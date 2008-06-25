@@ -1,5 +1,5 @@
 
-module Types where
+module MonadServ.Types where
 
 import Data.Maybe
 import Control.Concurrent.MVar     ( MVar, newEmptyMVar, tryTakeMVar, tryPutMVar, withMVar, takeMVar, putMVar )
@@ -9,7 +9,7 @@ import System.IO   ( stdout, stderr, stdin, hFlush, hPutStr, hPutStrLn
                    , BufferMode(..)
                    )
 
-import HttpMonad
+import MonadServ.HttpMonad
 
 type ServerCommand st = ( String , ServerConfig st -> Srv st () )
 --type ServerCommand = (String, String )

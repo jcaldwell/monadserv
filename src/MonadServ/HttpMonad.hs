@@ -2,7 +2,7 @@
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 
-module HttpMonad where 
+module MonadServ.HttpMonad where 
 
 import qualified Control.Exception as Ex
 
@@ -10,8 +10,8 @@ import Control.Monad.Reader
 import Control.Monad.State
 import System.IO
 
-import JSONObject
-import JSON
+import MonadServ.JSONObject
+import MonadServ.JSON
 
 type BackendOutput =   String
 

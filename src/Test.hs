@@ -2,11 +2,15 @@
 module Test where
 
 import qualified Data.Map as DataMap
-import HttpMonad
-import RunServer
-import Types
-import JSONObject
-import JSON
+
+import MonadServ.HttpMonad
+import MonadServ
+
+--import RunServer
+--import Types
+
+--import JSONObject
+--import JSON
 
 import ExampleModel
 

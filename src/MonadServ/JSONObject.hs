@@ -1,7 +1,7 @@
 
-module JSONObject where
+module MonadServ.JSONObject where
 
-import JSON
+import MonadServ.JSON
 
 class JSONObject a where
       toJSON :: a -> Value

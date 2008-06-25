@@ -1,7 +1,7 @@
 
-module TestJSON where
+module MonadServ.TestJSON where
 
-import JSON
 import Text.PrettyPrint.HughesPJ hiding (char)
+import MonadServ.JSON
 
 myText = String "Test"

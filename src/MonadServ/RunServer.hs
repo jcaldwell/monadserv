@@ -1,5 +1,5 @@
 
-module RunServer where
+module MonadServ.RunServer where
 
 import Text.ParserCombinators.Parsec
 import qualified Text.ParserCombinators.Parsec.Prim as Prim
@@ -14,12 +14,11 @@ import System.IO
 import System.Directory
 import qualified Data.Map as DataMap
 import Data.ByteString as ByteString (readFile, unpack)  
-
-import JSON
 import Text.PrettyPrint.HughesPJ hiding (char)
 
-import HttpMonad
-import Types
+import MonadServ.JSON
+import MonadServ.HttpMonad
+import MonadServ.Types
 
 -- Entry Point
 runServer :: ServerConfig st -> ServerBackend bst -> st -> IO st

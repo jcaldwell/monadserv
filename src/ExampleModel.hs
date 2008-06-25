@@ -2,8 +2,9 @@
 module ExampleModel where
 
 import qualified Data.Map as DataMap
-import JSONObject
-import JSON
+
+import MonadServ
+
 
 data ExampleReturnObject =
   ExampleReturnObject
