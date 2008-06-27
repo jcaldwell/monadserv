@@ -5,7 +5,6 @@ import HttpMonad
 import RunServer
 import Types
 
-
 data ExampleAppState = 
   ExampleAppState 
   { showCount   :: Bool      -- ^ If true, show the number of reductions at each step

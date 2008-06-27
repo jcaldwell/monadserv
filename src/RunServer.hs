@@ -4,13 +4,16 @@ module RunServer where
 import Text.ParserCombinators.Parsec
 import qualified Text.ParserCombinators.Parsec.Prim as Prim
 import Data.Char
+import Data.Word
 import Control.Exception hiding (try)
 import qualified Control.Exception as Ex
 import Control.Concurrent.MVar     ( MVar, newEmptyMVar, tryTakeMVar, tryPutMVar, withMVar, takeMVar, putMVar )
 import Control.Monad               ( when, MonadPlus(..) )
 import Network
 import System.IO
+import System.Directory
 import qualified Data.Map as DataMap
+import Data.ByteString as ByteString (readFile, unpack)  
 
 import HttpMonad
 import Types
@@ -97,28 +100,40 @@ serverLoop config backend iss = loop
 
    handleInput handle request@(Request op url hdrs msg) st' = do
        case lookup (tail url) (serverCommands config) of
-           Just f -> executeCommand handle f request st'
-           Nothing -> evaluateInput handle url st'
+           Just f -> executeCommand handle request st' f
+           Nothing -> serveContent handle request st'
+--           Nothing -> evaluateInput handle url st'
 
-{--       
-       case lookup inp (
 
-       case runRegex (commandsRegex desc) inp' of
-             (x,inp''):_ -> executeCommand handle request x inp'' st'
-             []          -> evaluateInput handle inp st'
---}
-
-   executeCommand handle f  a@(Request op url hdrs msg) st' = do
---       runSh st' (outputString backend bst) (srvPutStrLn $ "command from URL [" ++ (tail url) ++ "]" )
---       runSh st' (outputString backend bst) (srvPutStrLn $ "operation [" ++ op ++ "]" )
---       runSh st' (outputString backend bst) (srvPutStrLn $ "url       [" ++ url ++ "]" )
---       runSh st' (outputString backend bst) (srvPutStrLn $ "hdrs      [" ++ (show hdrs) ++ "]" )
---       runSh st' (outputString backend bst) (srvPutStrLn $ "msg       [" ++ msg ++ "]" )
-
+   executeCommand handle r@(Request op url hdrs msg) st' f = do
        (st'', _) <- runSh st' (outputString backend bst (Just handle)) (f config)
-
        hClose handle
        loop st''
+
+   serveContent handle r@(Request op url hdrs msg) st' = do
+       runSh st' (outputString backend bst Nothing) (srvPutStrLn $ " [" ++ op ++"] " ++ url ++ " --" )
+       let fileName=docRoot config ++ url
+       exists <- doesFileExist (fileName) 
+       if exists
+	 then do
+               let (mimetype,binary)= case DataMap.lookup (getExtension url) mimeMapping of
+					    Nothing -> ("text/plain",False)
+                                            Just (s,b) -> (s,b)
+	       if binary
+		 then do
+                       result <- ByteString.readFile (fileName)
+		       -- (encode (unpackList result))
+		       -- writeContent handle mimetype (octetsToString (unpackList result)) False
+                       writeContent handle mimetype (octetsToString (unpack result)) False
+		 else do
+		       result <- System.IO.readFile (fileName)
+		       writeContent handle mimetype result False
+	 else do
+	       write404 handle
+       loop st'
+
+
+
 
    evaluateInput handle inp st' = do
        runSh st' (outputString backend bst (Just handle)) (srvPutStrLn "evaluating input...")
@@ -130,6 +145,16 @@ handleINT :: IO ()
 handleINT = return ()
 
 ----------------------------------------
+octetsToString :: [Word8] -> String
+octetsToString = map (toEnum . fromIntegral)
+
+mimeMapping :: DataMap.Map String (String,Bool)
+mimeMapping=DataMap.fromList[("swf",("application/x-shockwave-flash",True)),
+	("html",("text/html",False)),("xml",("text/xml",False))]
+
+getExtension:: FilePath -> String
+getExtension s=map toLower (reverse (takeWhile (/= '.') (reverse s)))
+
 parseRequest :: Parser (Operation,URL,Headers,MsgContent)
 parseRequest = do
 	op <- many1 letter <?> "operation"
