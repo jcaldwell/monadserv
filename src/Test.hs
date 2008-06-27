@@ -8,24 +8,13 @@ import Types
 import JSONObject
 import JSON
 
-data ExampleReturnObject =
-  ExampleReturnObject
-  {  retCode  :: String
-  ,  retValue :: Int
-  ,  labels   :: [String]
-  }
+import ExampleModel
 
-instance JSONObject ExampleReturnObject where
-      toJSON ( ExampleReturnObject retCode retValue labels) =                
-               Object (DataMap.fromList [("retCode",  String retCode )
-                                        ,("retValue", Number ((fromIntegral $ retValue)::Double))
-                                        ,("labels", Array ( map (String) labels))
-                                        ])
 
 data ExampleAppState = 
   ExampleAppState 
-  { showCount   :: Bool      -- ^ If true, show the number of reductions at each step
-  , histFile    :: Maybe String -- ^ A file for command history
+  { showCount   :: Bool
+  , histFile    :: Maybe String
   , loadedValue :: Int
   }
 
