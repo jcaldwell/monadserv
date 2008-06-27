@@ -1,0 +1,60 @@
+
+OK - This is it.
+
+examples - 
+
+    http://localhost:8080/ex1
+    http://localhost:8080/ex2
+    http://localhost:8080/ex3
+    http://localhost:8080/ex2
+
+These are example URLs.  The URL pattern will be searched against the list of 
+defined server commands in the server description.
+If a match is found that monadic value will be evaluated.
+
+Test.hs is an example of what client application would look like.
+It is based on Shellac, but commands must have type " :: Srv st () ".
+Shellac offers parameterized command functions to have Int, String, Integer, etc parameter variables.
+I'm thinking that is next thing to add.  The parameters could be stripped from the URL and applied.
+
+Also there is no response written back to the browser right now.
+Everything is just sent to stdout for the server.
+
+The backend module will be responsible for that.  Currently though the handle is not available to
+the backend.  Also this is all single threaded...
+
+But hopefully this can be good starting point for something.
+
+The following session snippet shows the stdout from hitting the example URLs above, in same order.
+The user defined state is modified to show the value change from 4 to 20.
+
+    jeff@laptop:~/projects/haskell/monadHTTP/src$ ghci Test.hs 
+    GHCi, version 6.8.2: http://www.haskell.org/ghc/  :? for help
+    Loading package base ... linking ... done.
+    [1 of 4] Compiling HttpMonad        ( HttpMonad.hs, interpreted )
+    [2 of 4] Compiling Types            ( Types.hs, interpreted )
+    [3 of 4] Compiling RunServer        ( RunServer.hs, interpreted )
+    [4 of 4] Compiling Test             ( Test.hs, interpreted )
+    Ok, modules loaded: Types, Test, HttpMonad, RunServer.
+    *Test> 
+    *Test> test
+    Loading package mtl-1.1.0.0 ... linking ... done.
+    Loading package array-0.1.0.0 ... linking ... done.
+    Loading package containers-0.1.0.1 ... linking ... done.
+    Loading package bytestring-0.9.0.1 ... linking ... done.
+    Loading package parsec-3.0.0 ... linking ... done.
+    Loading package network-2.1.0.0 ... linking ... done.
+    Starting....
+    show before handling request...
+    
+    inside some action op. 
+    show before handling request...
+    
+    4
+    show before handling request...
+    show before handling request...
+    20
+    show before handling request...
+     
+--
+Jeff C.
