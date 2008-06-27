@@ -15,6 +15,9 @@ import System.Directory
 import qualified Data.Map as DataMap
 import Data.ByteString as ByteString (readFile, unpack)  
 
+import JSON
+import Text.PrettyPrint.HughesPJ hiding (char)
+
 import HttpMonad
 import Types
 
@@ -106,8 +109,15 @@ serverLoop config backend iss = loop
 
 
    executeCommand handle r@(Request op url hdrs msg) st' f = do
---       srvSpecial "magic"
-       (st'', _) <- runSh st' (outputString backend bst (Just handle)) (f config)
+       (st'', x) <- runSh st' (outputString backend bst (Just handle)) (f config)
+       let txt = case x of
+                       Just result -> case JSON.parse result of
+                                      Just res -> renderStyle (style {mode=OneLineMode}) (toDoc res)
+                                      Nothing -> "parse failed"
+                       Nothing -> " no result "
+       
+       runSh st' (outputString backend bst Nothing) (srvPutStrLn txt)
+             
        hClose handle
        loop st''
 

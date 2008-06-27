@@ -47,7 +47,7 @@ commands =
 wtfActionOp :: Srv ExampleAppState ()
 wtfActionOp = do
     x <- getSrvSpecial
-    putSrvSpecial "wtf"
+    putSrvSpecial "\"wtf\""
     y <- getSrvSpecial
     a <- getSrvSpecial
     srvPutStrLn $ (show x ) ++ " -- " ++ (show y) ++ " -- " ++ (show a)
