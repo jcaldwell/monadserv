@@ -1,9 +1,26 @@
 
 module Test where
 
+import qualified Data.Map as DataMap
 import HttpMonad
 import RunServer
 import Types
+import JSONObject
+import JSON
+
+data ExampleReturnObject =
+  ExampleReturnObject
+  {  retCode  :: String
+  ,  retValue :: Int
+  ,  labels   :: [String]
+  }
+
+instance JSONObject ExampleReturnObject where
+      toJSON ( ExampleReturnObject retCode retValue labels) =                
+               Object (DataMap.fromList [("retCode",  String retCode )
+                                        ,("retValue", Number ((fromIntegral $ retValue)::Double))
+                                        ,("labels", Array ( map (String) labels))
+                                        ])
 
 data ExampleAppState = 
   ExampleAppState 
@@ -41,19 +58,20 @@ commands =
   , ( "ex2" , (\_ -> exampleActionOp  ))
   , ( "ex3" , (\_ -> anotherExampleOp  ))
   , ( "ex4" , (\_ -> wtfActionOp ))
+  , ( "ex5" , (\_ -> yaeOp ))
+  , ( "ex6" , (\_ -> retActionOp ))
   ]
 
+--ppJSON x =  renderStyle (style{mode=OneLineMode}) (toDoc x)
 
 wtfActionOp :: Srv ExampleAppState ()
-wtfActionOp = do
-    x <- getSrvSpecial
-    putSrvSpecial "\"wtf\""
-    y <- getSrvSpecial
-    a <- getSrvSpecial
-    srvPutStrLn $ (show x ) ++ " -- " ++ (show y) ++ " -- " ++ (show a)
-    b <- getSrvSpecial
-    srvPutStrLn $ " -- " ++ (show b) ++ " -- "
---    modifySrvSt $ (\st -> st )
+wtfActionOp = putSrvSpecial $ String "wtf"
+
+retActionOp :: Srv ExampleAppState ()
+retActionOp = do
+    let x  = ExampleReturnObject { retCode = "pass", retValue = 15, labels = ["test", "some", "values", "here"] }
+    let y = toJSON x
+    putSrvSpecial y
 
 someActionOp :: Srv ExampleAppState ()
 someActionOp = do
@@ -61,10 +79,8 @@ someActionOp = do
     case x of
           Nothing -> do 
                    srvPutStrLn "nothing found."
-                   putSrvSpecial "magics"
-          Just txt -> srvPutStrLn $ "looks like we found some " ++ txt ++ ".  "
-
---someActionOp = srvPutStrLn "inside some action op. "
+                   putSrvSpecial $ String "magics"
+          Just txt -> srvPutStrLn $ "looks like we found some " ++ (show txt) ++ ".  "
 
 exampleActionOp :: Srv ExampleAppState ()
 exampleActionOp = do
@@ -76,3 +92,9 @@ anotherExampleOp :: Srv ExampleAppState ()
 anotherExampleOp = modifySrvSt $ 
                    (\st -> st { loadedValue = 20  } )
 
+yaeOp :: Srv ExampleAppState ()
+yaeOp = do 
+    myState <- getSrvSt
+    let x = loadedValue myState + 1
+    modifySrvSt $ (\st -> st { loadedValue = x  })
+    srvPutStrLn $ show x

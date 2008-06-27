@@ -110,14 +110,12 @@ serverLoop config backend iss = loop
 
    executeCommand handle r@(Request op url hdrs msg) st' f = do
        (st'', x) <- runSh st' (outputString backend bst (Just handle)) (f config)
-       let txt = case x of
-                       Just result -> case JSON.parse result of
-                                      Just res -> renderStyle (style {mode=OneLineMode}) (toDoc res)
-                                      Nothing -> "parse failed"
-                       Nothing -> " no result "
        
-       runSh st' (outputString backend bst Nothing) (srvPutStrLn txt)
-             
+       case x of
+             Just res -> do 
+                 let  parseResult = renderStyle (style {mode=OneLineMode}) (toDoc res)
+                 runSh st' (outputString backend bst (Just handle)) (srvPutStrLn parseResult)
+             Nothing -> runSh st' (outputString backend bst Nothing) (srvPutStrLn "log message...")
        hClose handle
        loop st''
 

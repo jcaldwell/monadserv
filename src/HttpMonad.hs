@@ -10,12 +10,16 @@ import Control.Monad.Reader
 import Control.Monad.State
 import System.IO
 
+import JSONObject
+import JSON
+
 type BackendOutput =   String
 
 -- | The type of results from shell commands.  They are a modified
 --   shell state and possibly a shell \"special\" action to execute.
 --type CommandResult st = (st,Maybe (ServerSpecial st))
-type CommandResult st = (st, Maybe String)
+--type CommandResult st = (st, Maybe String)
+type CommandResult st  = (st, Maybe Value )
 
 
 -- | The type of commands which produce output on the shell console.
@@ -70,14 +74,14 @@ modifySrvSt f = getSrvSt >>= putSrvSt . f
 
 --shellSpecial :: ShellSpecial st -> Sh st ()
 --shellSpecial spec = Sh (get >>= \ (st,_) -> put (st,Just spec))
-srvSpecial :: String -> Srv st ()
+srvSpecial :: Value -> Srv st ()
 srvSpecial spec = Srv (get >>= \ (st,_) -> put (st,Just spec))
 
-getSrvSpecial :: Srv st (Maybe String)
+getSrvSpecial :: Srv st (Maybe Value)
 getSrvSpecial = Srv (get >>= return . snd)
 
-putSrvSpecial :: String -> Srv st ()
-putSrvSpecial txt = Srv ( get >>= (\ (st,_) -> put (st,Just txt)))
+putSrvSpecial :: Value -> Srv st ()
+putSrvSpecial obj = Srv ( get >>= (\ (st,_) -> put (st,Just obj)))
 
 instance MonadState st (Srv st) where
       get = getSrvSt
