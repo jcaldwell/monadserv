@@ -1,4 +1,6 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
 
 module HttpMonad where 
 
@@ -12,7 +14,8 @@ type BackendOutput =   String
 
 -- | The type of results from shell commands.  They are a modified
 --   shell state and possibly a shell \"special\" action to execute.
-type CommandResult st = (st,Maybe (ServerSpecial st))
+--type CommandResult st = (st,Maybe (ServerSpecial st))
+type CommandResult st = (st, Maybe String)
 
 
 -- | The type of commands which produce output on the shell console.
@@ -64,3 +67,20 @@ putSrvSt st = Srv (get >>= \ (_,spec) -> put (st,spec))
 -- | Apply the given funtion to the shell state
 modifySrvSt :: (st -> st) -> Srv st ()
 modifySrvSt f = getSrvSt >>= putSrvSt . f
+
+--shellSpecial :: ShellSpecial st -> Sh st ()
+--shellSpecial spec = Sh (get >>= \ (st,_) -> put (st,Just spec))
+srvSpecial :: String -> Srv st ()
+srvSpecial spec = Srv (get >>= \ (st,_) -> put (st,Just spec))
+
+getSrvSpecial :: Srv st (Maybe String)
+getSrvSpecial = Srv (get >>= return . snd)
+
+putSrvSpecial :: String -> Srv st ()
+putSrvSpecial txt = Srv ( get >>= (\ (st,_) -> put (st,Just txt)))
+
+instance MonadState st (Srv st) where
+      get = getSrvSt
+      put = putSrvSt
+
+

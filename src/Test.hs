@@ -40,10 +40,31 @@ commands =
     ( "ex1" , (\_ -> someActionOp  ))
   , ( "ex2" , (\_ -> exampleActionOp  ))
   , ( "ex3" , (\_ -> anotherExampleOp  ))
+  , ( "ex4" , (\_ -> wtfActionOp ))
   ]
 
+
+wtfActionOp :: Srv ExampleAppState ()
+wtfActionOp = do
+    x <- getSrvSpecial
+    putSrvSpecial "wtf"
+    y <- getSrvSpecial
+    a <- getSrvSpecial
+    srvPutStrLn $ (show x ) ++ " -- " ++ (show y) ++ " -- " ++ (show a)
+    b <- getSrvSpecial
+    srvPutStrLn $ " -- " ++ (show b) ++ " -- "
+--    modifySrvSt $ (\st -> st )
+
 someActionOp :: Srv ExampleAppState ()
-someActionOp = srvPutStrLn "inside some action op. "
+someActionOp = do
+    x <- getSrvSpecial
+    case x of
+          Nothing -> do 
+                   srvPutStrLn "nothing found."
+                   putSrvSpecial "magics"
+          Just txt -> srvPutStrLn $ "looks like we found some " ++ txt ++ ".  "
+
+--someActionOp = srvPutStrLn "inside some action op. "
 
 exampleActionOp :: Srv ExampleAppState ()
 exampleActionOp = do

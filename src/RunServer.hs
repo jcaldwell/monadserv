@@ -106,6 +106,7 @@ serverLoop config backend iss = loop
 
 
    executeCommand handle r@(Request op url hdrs msg) st' f = do
+--       srvSpecial "magic"
        (st'', _) <- runSh st' (outputString backend bst (Just handle)) (f config)
        hClose handle
        loop st''
