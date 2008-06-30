@@ -2,7 +2,7 @@
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 
-module MonadServ.HttpMonad where 
+module MonadServ.HttpMonad where
 
 import qualified Control.Exception as Ex
 
@@ -34,7 +34,7 @@ newtype Srv st a = Srv { unSrv :: StateT (CommandResult st) (ReaderT OutputComma
 
 -- | Special commands for the shell framework.
 data ServerSpecial st
-  = ServerExit                  -- ^ Causes the shell to exit 
+  = ServerExit                  -- ^ Causes the shell to exit
   | ServerHelp (Maybe String)   -- ^ Causes the shell to print an informative message.
                                --   If a command name is specified, only information about
                                --   that command will be displayed
@@ -44,9 +44,14 @@ data ServerSpecial st
 -- Monad Functions
 ---------------------------------------------
 
--- | Execute a shell action
-runSh :: st -> OutputCommand -> Srv st () -> IO (CommandResult st)
-runSh st info = (flip runReaderT) info . (flip execStateT) (st,Nothing) . unSrv
+-- | Execute a server action
+runSrv :: st -> OutputCommand -> Srv st () -> IO (CommandResult st)
+runSrv st info = runSrvSpecial st Nothing info
+--runSrv st info = (flip runReaderT) info . (flip execStateT) (st,Nothing) . unSrv
+
+
+runSrvSpecial :: st -> Maybe Value -> OutputCommand -> Srv st () -> IO (CommandResult st)
+runSrvSpecial st value info = (flip runReaderT) info . (flip execStateT) (st, value) . unSrv
 
 -- | Output a tagged string to the console
 srvPut :: BackendOutput -> Srv st ()
@@ -54,7 +59,7 @@ srvPut out = Srv (lift ask >>= \f -> liftIO (f out))
 
 -- | Prints a regular output string
 srvPutStr :: String -> Srv st ()
-srvPutStr  = srvPut 
+srvPutStr  = srvPut
 
 -- | Prints regular output with a line terminator
 srvPutStrLn :: String -> Srv st ()

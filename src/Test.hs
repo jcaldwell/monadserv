@@ -2,21 +2,14 @@
 module Test where
 
 import qualified Data.Map as DataMap
-
 import MonadServ.HttpMonad
 import MonadServ
-
---import RunServer
---import Types
-
---import JSONObject
---import JSON
 
 import ExampleModel
 
 
-data ExampleAppState = 
-  ExampleAppState 
+data ExampleAppState =
+  ExampleAppState
   { showCount   :: Bool
   , histFile    :: Maybe String
   , loadedValue :: Int
@@ -40,13 +33,13 @@ myShell init = do
       desc =
          (mkServerConfig commands )
          { port  = 8080
-         , docRoot = "/var/www/" 
+         , docRoot = "/var/www/"
          }
     runServer desc (templateBackend "JSON") init
 
 commands :: [ServerCommand ExampleAppState]
 commands =
-  [ 
+  [
     ( "ex1" , (\_ -> someActionOp  ))
   , ( "ex2" , (\_ -> exampleActionOp  ))
   , ( "ex3" , (\_ -> anotherExampleOp  ))
@@ -70,7 +63,7 @@ someActionOp :: Srv ExampleAppState ()
 someActionOp = do
     x <- getSrvSpecial
     case x of
-          Nothing -> do 
+          Nothing -> do
                    srvPutStrLn "nothing found."
                    putSrvSpecial $ String "magics"
           Just txt -> srvPutStrLn $ "looks like we found some " ++ (show txt) ++ ".  "
@@ -82,11 +75,11 @@ exampleActionOp = do
     srvPutStrLn x
 
 anotherExampleOp :: Srv ExampleAppState ()
-anotherExampleOp = modifySrvSt $ 
+anotherExampleOp = modifySrvSt $
                    (\st -> st { loadedValue = 20  } )
 
 yaeOp :: Srv ExampleAppState ()
-yaeOp = do 
+yaeOp = do
     myState <- getSrvSt
     let x = loadedValue myState + 1
     modifySrvSt $ (\st -> st { loadedValue = x  })
