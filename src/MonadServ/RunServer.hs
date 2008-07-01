@@ -108,7 +108,7 @@ serverLoop config backend iss = loop
 
 
    executeCommand handle r@(Request op url hdrs msg) st' f = do
-
+       runSrv st' (outputString backend bst Nothing) (srvPutStrLn $ op ++ ": [" ++ url ++ "]")
        let parseResult= MonadServ.JSON.parse msg
        (st'' , x) <- runSrvSpecial st' parseResult (outputString backend bst (Just handle)) (f config)
 --       (st'', x) <- runSrv st' (outputString backend bst (Just handle)) (f config)
@@ -117,7 +117,7 @@ serverLoop config backend iss = loop
              Just res -> do
                  let  parseResult = renderStyle (style {mode=OneLineMode}) (toDoc res)
                  runSrv st' (outputString backend bst (Just handle)) (srvPutStrLn parseResult)
-             Nothing -> runSrv st' (outputString backend bst Nothing) (srvPutStrLn "log message...")
+             Nothing -> runSrv st' (outputString backend bst Nothing) (srvPutStrLn $ url ++ " returns no JSON Object.")
        hClose handle
        loop st''
 
