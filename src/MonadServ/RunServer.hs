@@ -116,7 +116,7 @@ serverLoop config backend iss = loop
        case x of
              Just res -> do
                  let  parseResult = renderStyle (style {mode=OneLineMode}) (toDoc res)
-                 runSrv st' (outputString backend bst (Just handle)) (srvPutStrLn parseResult)
+                 runSrv st' (outputString backend bst (Just handle)) (srvPutStrLn $ "testCallback(" ++ parseResult ++ ");")
              Nothing -> runSrv st' (outputString backend bst Nothing) (srvPutStrLn $ url ++ " returns no JSON Object.")
        hClose handle
        loop st''
