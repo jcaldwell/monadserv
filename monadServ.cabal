@@ -16,12 +16,19 @@ Description:
   commands.  Support for multiple backends.  
   git clone git://jaxclipse.com/monadServ.git
 
+Flag small_base
+  Description: Choose the new smaller, split-up base package.
 
 Library
   Hs-Source-Dirs:
      src
-  Build-Depends:
+
+  if flag(small_base)
+    Build-Depends:
      base, haskell98, mtl, pretty, bytestring, network, parsec
+  else
+    Build-Depends: base < 3, parsec, mtl, network
+
   Extensions:
      MultiParamTypeClasses
      FunctionalDependencies
