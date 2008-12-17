@@ -58,5 +58,14 @@ The user defined state is modified to show the value change from 4 to 20.
     20
     show before handling request...
      
+INSTALL:
+hopefully you have seen this before...
+
+  ./Setup.hs clean
+  ./Setup.hs configure --user --prefix=${HOME}
+  ./Setup.hs build
+  ./Setup.hs install
+
 --
 Jeff C.
+jeffery.caldwell@gmail.com
