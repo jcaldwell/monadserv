@@ -68,14 +68,13 @@ serverLoop config backend iss = loop
 --   loop :: st -> IO st
    loop st = do
 ---       flushOutput bst bst
-       runSrv st (outputString backend bst Nothing) (beforePrompt config)  --might remove beforePrompt to beforeAccept
+       runSrv st (outputString backend bst Nothing) (beforePrompt config) 
        (handle,hostName,portNumber) <- accept $ sock iss
 
        inp <- getInput handle hostName
 
        case inp  of
              Nothing -> return st
---             Just a@(Request _ url _ _) -> evaluateInput handle (tail url) st
              Just request@(Request op url hdrs msg) -> handleInput handle request st
 
 
@@ -104,7 +103,7 @@ serverLoop config backend iss = loop
        case lookup (tail url) (serverCommands config) of
            Just f -> executeCommand handle request st' f
            Nothing -> serveContent handle request st'
---           Nothing -> evaluateInput handle url st'
+
 
 
    executeCommand handle r@(Request op url hdrs msg) st' f = do
@@ -144,12 +143,6 @@ serverLoop config backend iss = loop
        loop st'
 
 
-
-
-   evaluateInput handle inp st' = do
-       runSrv st' (outputString backend bst (Just handle)) (srvPutStrLn "evaluating input...")
-       hClose handle
-       loop st'
 
 --what to do when we are interrupted.
 handleINT :: IO ()
