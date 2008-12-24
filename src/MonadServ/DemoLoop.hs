@@ -22,28 +22,28 @@ data InternalServerState
    = InternalServerState
      { isLogEnabled    :: Bool
      , sock            :: Maybe Socket
-     , pool            :: MVar WorkerPool  }
+     , pool            :: Maybe (MVar WorkerPool)  }
 
-type Environment = [String]
+type Environment = Int
 
-defaultInternalServerState = InternalServerState { isLogEnabled = False, sock = Nothing }
+defaultInternalServerState = InternalServerState { isLogEnabled = False, sock = Nothing, pool = Nothing }
 
 main = do
     (port:_) <- getArgs
     sck <- listenOn (PortNumber (fromIntegral (read port :: Int)))
     workerPoolMVar <- newMVar $ WorkerPool 0 [] []
-    let iss =  defaultInternalServerState { sock = Just sck, pool = workerPoolMVar }
+    let iss =  defaultInternalServerState { sock = Just sck, pool = Just workerPoolMVar }
     putStrLn $ "server is starting on port: " ++ show port
     runServer iss
 
 
 runServer :: InternalServerState -> IO ()
-runServer iss@(InternalServerState isLogEnabled (Just socket) workerPoolMVar) =  Ex.bracket setup exit loop
+runServer iss@(InternalServerState isLogEnabled (Just socket) (Just workerPoolMVar)) =  Ex.bracket setup exit loop
     where  setup = do putStrLn "ready for requests..."
                       return (socket, workerPoolMVar)
 
            loop (s, workerPoolMVar)  = do (sock', sockAddr) <- accept s
-                                          WorkerThread _ chan <- getWorkerThread workerPoolMVar []
+                                          WorkerThread _ chan <- getWorkerThread workerPoolMVar 0
                                           writeChan chan sock'
                                           loop (s, workerPoolMVar)
 
@@ -60,26 +60,27 @@ workerLoop :: MVar WorkerPool ->
               Chan Socket     ->
               IO ()
 workerLoop workerPoolMVar e chan
-    = do mainLoop
+    = do mainLoop e
     where
-      mainLoop
+      mainLoop e
           = do sock      <- readChan chan
                work sock e
                putWorkerThread workerPoolMVar chan
-               mainLoop
+               mainLoop (e + 1)
 
 
 work :: Socket -> Environment -> IO ()
-work sock' _  = do
+work sock' e  = do
     r <- getRequest sock'
     case r of
           Just req@(Request uri method headers body) -> do putStrLn "request received"
-                                                           sendResponse sock' $ buildResponse uri
+                                                           sendResponse sock' $ buildResponse uri e
           Nothing -> putStrLn "error caught..."
     sClose sock'
 
-buildResponse :: URI -> String
-buildResponse uri@(URI scheme _ path query fragment) = "You have requested-- scheme[" ++ scheme ++ "] path [" ++ path ++ "] query [" ++ query ++ "] fragment ["++ fragment ++ "]"
+buildResponse :: URI -> Environment -> String
+buildResponse uri@(URI scheme _ path query fragment) e = "counter[ " ++ show e ++ "] <br><br> " ++
+                                                         "You have requested-- scheme[" ++ scheme ++ "] path [" ++ path ++ "] query [" ++ query ++ "] fragment ["++ fragment ++ "]"
 
 
 
