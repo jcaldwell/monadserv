@@ -99,15 +99,17 @@ handleRequest :: Request -> Environment -> IO (String, Environment)
 handleRequest req@(Request uri@(URI scheme _ path query fragment) _ _ _) e@(Environment counter store) = do
     msessionId <- getParmValue "id" query
     return $ case msessionId of
-          Nothing -> handleNoSession e
+          Nothing -> handleNoSession 
           Just sessionId -> do
                         let session =  (Map.lookup sessionId store) :: Maybe Int
                         handleSession sessionId session 
-    where handleNoSession e = ("No Session: " ++ base , e )
+    where handleNoSession = ("No Session: " ++ base , e )
           handleSession sessionId Nothing  = 
-              (base ++  "   sessionId [" ++ sessionId ++ "] sessionCounter[--0--]"  , Environment counter  (Map.insert  sessionId  1 store ))
+              (base ++  "   sessionId [" ++ sessionId ++ "] sessionCounter[--0--]"  , 
+                    Environment counter  (Map.insert  sessionId  1 store ))
           handleSession sessionId (Just sessionValue) =
-              (base ++  "   sessionId [" ++ sessionId ++ "] sessionCounter[" ++ show sessionValue ++ "]" , Environment counter  (Map.insert  sessionId (sessionValue + 1) store ))
+              (base ++  "   sessionId [" ++ sessionId ++ "] sessionCounter[" ++ show sessionValue ++ "]" , 
+                    Environment counter  (Map.insert  sessionId (sessionValue + 1) store ))
           base =  "counter[ " ++ show counter ++ "] <br><br> " ++
                   "You have requested-- scheme[" ++ scheme ++ 
                   "] path [" ++ path ++ "] query [" ++ query ++ 
