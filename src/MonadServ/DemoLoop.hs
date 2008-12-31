@@ -84,40 +84,34 @@ work :: Socket -> Environment -> IO Environment
 work sock' e  = do
     r <- getRequest sock'
     e' <- case r of
-                Just req@(Request uri@(URI _ _ _ query _) method headers body) -> do putStrLn "request received"
-                                                                                     id <- getParmValue "id" query
-                                                                                     let x = case id of
-                                                                                                Nothing -> Nothing
-                                                                                                Just idValue -> (Map.lookup idValue $ store e) :: Maybe Int
-                                                                                     let (response, e') = buildResponse (id, x) uri e
-                                                                                     sendResponse sock' response
-                                                                                     return e'
-                                                                               
+                Just req -> do 
+                     putStrLn "request received"
+                     (result, e') <- handleRequest req e
+                     sendResponse sock' result
+                     return e'
                 Nothing -> do 
-                    putStrLn "error caught..."
-                    return e
+                     putStrLn "error caught..."
+                     return e
     sClose sock'
     return e'
 
-buildResponse ::(Maybe String, Maybe Int) -> URI -> Environment -> (String , Environment)
-buildResponse (id, Just sesCounter) uri@(URI scheme _ path query fragment) e@(Environment counter map) = result 
-    where result =  case id of
-                          Nothing -> (base , e)
-                          Just idvalue -> (base ++  "   sessionId [" ++ idvalue ++ "] sessionCounter[" ++ show sesCounter ++ "]" , Environment counter  (Map.insert  idvalue (sesCounter + 1) map))
+handleRequest :: Request -> Environment -> IO (String, Environment)
+handleRequest req@(Request uri@(URI scheme _ path query fragment) _ _ _) e@(Environment counter store) = do
+    msessionId <- getParmValue "id" query
+    return $ case msessionId of
+          Nothing -> handleNoSession e
+          Just sessionId -> do
+                        let session =  (Map.lookup sessionId store) :: Maybe Int
+                        handleSession sessionId session 
+    where handleNoSession e = ("No Session: " ++ base , e )
+          handleSession sessionId Nothing  = 
+              (base ++  "   sessionId [" ++ sessionId ++ "] sessionCounter[--0--]"  , Environment counter  (Map.insert  sessionId  1 store ))
+          handleSession sessionId (Just sessionValue) =
+              (base ++  "   sessionId [" ++ sessionId ++ "] sessionCounter[" ++ show sessionValue ++ "]" , Environment counter  (Map.insert  sessionId (sessionValue + 1) store ))
           base =  "counter[ " ++ show counter ++ "] <br><br> " ++
                   "You have requested-- scheme[" ++ scheme ++ 
                   "] path [" ++ path ++ "] query [" ++ query ++ 
                   "] fragment ["++ fragment ++ "]" 
-buildResponse (id, Nothing ) uri@(URI scheme _ path query fragment) e@(Environment counter map) = result 
-    where result =  case id of
-                          Nothing -> (base , e)
-                          Just idvalue -> (base ++  "   sessionId [" ++ idvalue ++ "] sessionCounter[--0--]"  , Environment counter  (Map.insert  idvalue 1 map))
-          base =  "counter[ " ++ show counter ++ "] <br><br> " ++
-                  "You have requested-- scheme[" ++ scheme ++ 
-                  "] path [" ++ path ++ "] query [" ++ query ++ 
-                  "] fragment ["++ fragment ++ "]" 
-
-
 
 
 
