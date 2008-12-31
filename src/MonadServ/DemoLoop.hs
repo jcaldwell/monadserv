@@ -14,9 +14,13 @@ import System.Time
 import Data.Time
 import Data.Char
 import qualified Data.Map as DataMap
-import Data.List
+import Data.List 
 import Control.Exception hiding (try)
 import qualified Control.Exception as Ex
+import Text.ParserCombinators.Parsec
+import Numeric (readHex)
+import Data.Map as Map hiding (filter, union)
+import Control.Monad
 
 data InternalServerState 
    = InternalServerState
@@ -24,9 +28,14 @@ data InternalServerState
      , sock            :: Maybe Socket
      , pool            :: Maybe (MVar WorkerPool)  }
 
-type Environment = Int
+--type Environment = Int
+
+data Environment = Environment { hitCounter :: Int
+                               , store :: DataMap.Map String Int }
 
 defaultInternalServerState = InternalServerState { isLogEnabled = False, sock = Nothing, pool = Nothing }
+
+initialEnvironment = Environment { hitCounter = 0, store = DataMap.empty }
 
 main = do
     (port:_) <- getArgs
@@ -43,7 +52,7 @@ runServer iss@(InternalServerState isLogEnabled (Just socket) (Just workerPoolMV
                       return (socket, workerPoolMVar)
 
            loop (s, workerPoolMVar)  = do (sock', sockAddr) <- accept s
-                                          WorkerThread _ chan <- getWorkerThread workerPoolMVar 0
+                                          WorkerThread _ chan <- getWorkerThread workerPoolMVar initialEnvironment
                                           writeChan chan sock'
                                           loop (s, workerPoolMVar)
 
@@ -66,21 +75,29 @@ workerLoop workerPoolMVar e chan
           = do sock      <- readChan chan
                work sock e
                putWorkerThread workerPoolMVar chan
-               mainLoop (e + 1)
+               mainLoop e{hitCounter = (hitCounter e) + 1}
 
 
 work :: Socket -> Environment -> IO ()
 work sock' e  = do
     r <- getRequest sock'
     case r of
-          Just req@(Request uri method headers body) -> do putStrLn "request received"
-                                                           sendResponse sock' $ buildResponse uri e
+          Just req@(Request uri@(URI _ _ _ query _) method headers body) -> do putStrLn "request received"
+                                                                               id <- getParmValue "id" query
+                                                                               sendResponse sock' $ buildResponse id uri e
           Nothing -> putStrLn "error caught..."
     sClose sock'
 
-buildResponse :: URI -> Environment -> String
-buildResponse uri@(URI scheme _ path query fragment) e = "counter[ " ++ show e ++ "] <br><br> " ++
-                                                         "You have requested-- scheme[" ++ scheme ++ "] path [" ++ path ++ "] query [" ++ query ++ "] fragment ["++ fragment ++ "]"
+buildResponse :: Maybe String -> URI -> Environment -> String
+buildResponse id uri@(URI scheme _ path query fragment) (Environment counter map) = 
+    case id of
+          Nothing -> base 
+          Just idvalue -> base ++  "   id [" ++ idvalue ++ "]"
+    where base =  "counter[ " ++ show counter ++ "] <br><br> " ++
+                  "You have requested-- scheme[" ++ scheme ++ 
+                  "] path [" ++ path ++ "] query [" ++ query ++ 
+                  "] fragment ["++ fragment ++ "]" 
+
 
 
 
@@ -162,3 +179,46 @@ startingHeaders t = [ Header HdrServer "Jaxclipse  www.jaxclipse.com"
 
 instance Eq Header where
   (==) (Header hn1 _) (Header hn2 _) = hn1 == hn2
+
+------------------------------------------------
+-- | Parsec Stuff
+------------------------------------------------
+
+
+p_query :: CharParser () [(String, Maybe String)]
+p_query = char '?' >> p_pair `sepBy` char '&'
+
+p_pair :: CharParser () (String, Maybe String)
+p_pair = do
+  name <- many1 p_char
+  value <- optionMaybe (char '=' >> many p_char)
+  return (name, value)
+
+p_char :: CharParser () Char
+p_char = oneOf urlBaseChars
+     <|> (char '+' >> return ' ')
+     <|> p_hex
+
+urlBaseChars = ['a'..'z']++['A'..'Z']++['0'..'9']++"$-_.!*'(),"
+
+p_hex :: CharParser () Char
+p_hex = do
+  char '%'
+  a <- hexDigit
+  b <- hexDigit
+  let ((d, _):_) = readHex [a,b]
+  return . toEnum $ d
+
+
+parseParms :: String -> IO ( Maybe ( Map String  (Maybe String)))
+parseParms  input = do
+    let result = parse p_query "(unknown)" input
+    case result of
+          Left e -> return Nothing
+          Right m -> return $ Just $ fromList m
+
+getParmValue parm input = do
+    parseResult <- parseParms input
+    case parseResult of
+          Nothing -> return Nothing
+          Just m ->  return $ join $  Map.lookup parm m
