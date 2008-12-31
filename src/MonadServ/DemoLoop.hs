@@ -21,6 +21,7 @@ import Text.ParserCombinators.Parsec
 import Numeric (readHex)
 import Data.Map as Map hiding (filter, union)
 import Control.Monad
+import Data.Maybe
 
 data InternalServerState 
    = InternalServerState
@@ -32,6 +33,7 @@ data InternalServerState
 
 data Environment = Environment { hitCounter :: Int
                                , store :: DataMap.Map String Int }
+                   deriving (Show)
 
 defaultInternalServerState = InternalServerState { isLogEnabled = False, sock = Nothing, pool = Nothing }
 
@@ -73,27 +75,44 @@ workerLoop workerPoolMVar e chan
     where
       mainLoop e
           = do sock      <- readChan chan
-               work sock e
+               e' <- work sock e
                putWorkerThread workerPoolMVar chan
-               mainLoop e{hitCounter = (hitCounter e) + 1}
+               mainLoop e'{hitCounter = (hitCounter e') + 1}
 
 
-work :: Socket -> Environment -> IO ()
+work :: Socket -> Environment -> IO Environment
 work sock' e  = do
     r <- getRequest sock'
-    case r of
-          Just req@(Request uri@(URI _ _ _ query _) method headers body) -> do putStrLn "request received"
-                                                                               id <- getParmValue "id" query
-                                                                               sendResponse sock' $ buildResponse id uri e
-          Nothing -> putStrLn "error caught..."
+    e' <- case r of
+                Just req@(Request uri@(URI _ _ _ query _) method headers body) -> do putStrLn "request received"
+                                                                                     id <- getParmValue "id" query
+                                                                                     let x = case id of
+                                                                                                Nothing -> Nothing
+                                                                                                Just idValue -> (Map.lookup idValue $ store e) :: Maybe Int
+                                                                                     let (response, e') = buildResponse (id, x) uri e
+                                                                                     sendResponse sock' response
+                                                                                     return e'
+                                                                               
+                Nothing -> do 
+                    putStrLn "error caught..."
+                    return e
     sClose sock'
+    return e'
 
-buildResponse :: Maybe String -> URI -> Environment -> String
-buildResponse id uri@(URI scheme _ path query fragment) (Environment counter map) = 
-    case id of
-          Nothing -> base 
-          Just idvalue -> base ++  "   id [" ++ idvalue ++ "]"
-    where base =  "counter[ " ++ show counter ++ "] <br><br> " ++
+buildResponse ::(Maybe String, Maybe Int) -> URI -> Environment -> (String , Environment)
+buildResponse (id, Just sesCounter) uri@(URI scheme _ path query fragment) e@(Environment counter map) = result 
+    where result =  case id of
+                          Nothing -> (base , e)
+                          Just idvalue -> (base ++  "   sessionId [" ++ idvalue ++ "] sessionCounter[" ++ show sesCounter ++ "]" , Environment counter  (Map.insert  idvalue (sesCounter + 1) map))
+          base =  "counter[ " ++ show counter ++ "] <br><br> " ++
+                  "You have requested-- scheme[" ++ scheme ++ 
+                  "] path [" ++ path ++ "] query [" ++ query ++ 
+                  "] fragment ["++ fragment ++ "]" 
+buildResponse (id, Nothing ) uri@(URI scheme _ path query fragment) e@(Environment counter map) = result 
+    where result =  case id of
+                          Nothing -> (base , e)
+                          Just idvalue -> (base ++  "   sessionId [" ++ idvalue ++ "] sessionCounter[--0--]"  , Environment counter  (Map.insert  idvalue 1 map))
+          base =  "counter[ " ++ show counter ++ "] <br><br> " ++
                   "You have requested-- scheme[" ++ scheme ++ 
                   "] path [" ++ path ++ "] query [" ++ query ++ 
                   "] fragment ["++ fragment ++ "]" 
