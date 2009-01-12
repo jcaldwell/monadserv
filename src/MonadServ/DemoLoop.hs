@@ -32,7 +32,7 @@ data InternalServerState
 --type Environment = Int
 
 data EnvironmentMV = EnvironmentMV { hitCounter' :: Int
-                                   , store' :: MVar (DataMap.Map String Int)}
+                                   , store' :: MVar (DataMap.Map String (MVar Int))}
 
 
 initialMV = do
@@ -40,7 +40,7 @@ initialMV = do
     return $ EnvironmentMV 0 envMVar
 
 data Environment = Environment { hitCounter :: Int
-                               , store :: MVar (DataMap.Map String Int) }
+                               , store :: MVar (DataMap.Map String (MVar Int)) }
 --                   deriving (Show)
 
 defaultInternalServerState = InternalServerState { isLogEnabled = False, sock = Nothing, pool = Nothing }
@@ -113,21 +113,29 @@ handleRequest req@(Request uri@(URI scheme _ path query fragment) _ _ _) e@(Envi
     (resultString, resultEnvironment) <-  case msessionId of
                                                 Nothing -> return $  handleNoSession mstore
                                                 Just sessionId -> do
-                                                              let session =  (Map.lookup sessionId mstore) :: Maybe Int
-                                                              return $ handleSession sessionId session mstore
+                                                              let sessionMV =  (Map.lookup sessionId mstore) :: Maybe (MVar Int)
+                                                              handleSession sessionId sessionMV mstore
     putMVar storeMV $ resultEnvironment
     return (resultString, Environment counter storeMV )
         where handleNoSession mstore = ("No Session: " ++ base , mstore )
-              handleSession sessionId Nothing mstore  = 
-                  (base ++  "   sessionId [" ++ sessionId ++ "] sessionCounter[--0--]"  , 
-                   Map.insert  sessionId  1 mstore )
-              handleSession sessionId (Just sessionValue) mstore =
-                  (base ++  "   sessionId [" ++ sessionId ++ "] sessionCounter[" ++ show sessionValue ++ "]" , 
-                   Map.insert  sessionId (sessionValue + 1) mstore )
-              base =  "counter[ " ++ show counter ++ "] <br><br> " ++
-                      "You have requested-- scheme[" ++ scheme ++ 
-                     "] path [" ++ path ++ "] query [" ++ query ++ 
-                     "] fragment ["++ fragment ++ "]" 
+              handleSession sessionId Nothing mstore  = do
+                  sesMVar <- newMVar 1
+                  return $ (base ++  "   sesId [" ++ sessionId ++ "] sesCounter[--0--]"  , 
+                   Map.insert  sessionId  sesMVar mstore )
+              handleSession sessionId (Just sessionValueMV) mstore = do
+                  sessionValue <- takeMVar sessionValueMV
+                  let sessionValue' = sessionValue + 1
+                  let (rS, rE)  = (base ++  "   sessionId [" ++ sessionId ++ "] sessionCounter[" ++ show sessionValue' ++ "]" , 
+                                        Map.insert  sessionId sessionValueMV mstore )
+                  putMVar sessionValueMV  sessionValue'
+                  return (rS, rE)
+              base =  "c[ " ++ show counter ++ "]  " ++  " query [" ++ query ++ "] "
+
+
+--              base =  "counter[ " ++ show counter ++ "]  " ++
+--                      "You have requested-- scheme[" ++ scheme ++ 
+--                     "] path [" ++ path ++ "] query [" ++ query ++ 
+--                     "] fragment ["++ fragment ++ "]" 
 
 
 ------------------------------------------------
@@ -141,7 +149,7 @@ data WorkerPool = WorkerPool { numWorkers :: Int,
                                busyWorkers :: [(WorkerThread, ExpiresTime)]}
 
 --getWorkerThread :: MVar WorkerPool -> IO WorkerThread
-getWorkerThread mv e = 
+getWorkerThread mv e =
   do wp <- takeMVar mv
      case wp of
        WorkerPool n [] bs -> 
