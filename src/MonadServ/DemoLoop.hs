@@ -31,13 +31,23 @@ data InternalServerState
 
 --type Environment = Int
 
+data EnvironmentMV = EnvironmentMV { hitCounter' :: Int
+                                   , store' :: MVar (DataMap.Map String Int)}
+
+
+initialMV = do
+    envMVar <- newMVar $ DataMap.empty
+    return $ EnvironmentMV 0 envMVar
+
 data Environment = Environment { hitCounter :: Int
-                               , store :: DataMap.Map String Int }
-                   deriving (Show)
+                               , store :: MVar (DataMap.Map String Int) }
+--                   deriving (Show)
 
 defaultInternalServerState = InternalServerState { isLogEnabled = False, sock = Nothing, pool = Nothing }
 
-initialEnvironment = Environment { hitCounter = 0, store = DataMap.empty }
+initialEnvironment = do
+    envMVar <- newMVar $ DataMap.empty
+    return $ Environment 0 envMVar
 
 main = do
     (port:_) <- getArgs
@@ -54,7 +64,8 @@ runServer iss@(InternalServerState isLogEnabled (Just socket) (Just workerPoolMV
                       return (socket, workerPoolMVar)
 
            loop (s, workerPoolMVar)  = do (sock', sockAddr) <- accept s
-                                          WorkerThread _ chan <- getWorkerThread workerPoolMVar initialEnvironment
+                                          env <- initialEnvironment
+                                          WorkerThread _ chan <- getWorkerThread workerPoolMVar env
                                           writeChan chan sock'
                                           loop (s, workerPoolMVar)
 
@@ -96,25 +107,27 @@ work sock' e  = do
     return e'
 
 handleRequest :: Request -> Environment -> IO (String, Environment)
-handleRequest req@(Request uri@(URI scheme _ path query fragment) _ _ _) e@(Environment counter store) = do
+handleRequest req@(Request uri@(URI scheme _ path query fragment) _ _ _) e@(Environment counter storeMV) = do
     msessionId <- getParmValue "id" query
-    return $ case msessionId of
-          Nothing -> handleNoSession 
-          Just sessionId -> do
-                        let session =  (Map.lookup sessionId store) :: Maybe Int
-                        handleSession sessionId session 
-    where handleNoSession = ("No Session: " ++ base , e )
-          handleSession sessionId Nothing  = 
-              (base ++  "   sessionId [" ++ sessionId ++ "] sessionCounter[--0--]"  , 
-                    Environment counter  (Map.insert  sessionId  1 store ))
-          handleSession sessionId (Just sessionValue) =
-              (base ++  "   sessionId [" ++ sessionId ++ "] sessionCounter[" ++ show sessionValue ++ "]" , 
-                    Environment counter  (Map.insert  sessionId (sessionValue + 1) store ))
-          base =  "counter[ " ++ show counter ++ "] <br><br> " ++
-                  "You have requested-- scheme[" ++ scheme ++ 
-                  "] path [" ++ path ++ "] query [" ++ query ++ 
-                  "] fragment ["++ fragment ++ "]" 
-
+    mstore <- takeMVar storeMV
+    (resultString, resultEnvironment) <-  case msessionId of
+                                                Nothing -> return $  handleNoSession mstore
+                                                Just sessionId -> do
+                                                              let session =  (Map.lookup sessionId mstore) :: Maybe Int
+                                                              return $ handleSession sessionId session mstore
+    putMVar storeMV $ resultEnvironment
+    return (resultString, Environment counter storeMV )
+        where handleNoSession mstore = ("No Session: " ++ base , mstore )
+              handleSession sessionId Nothing mstore  = 
+                  (base ++  "   sessionId [" ++ sessionId ++ "] sessionCounter[--0--]"  , 
+                   Map.insert  sessionId  1 mstore )
+              handleSession sessionId (Just sessionValue) mstore =
+                  (base ++  "   sessionId [" ++ sessionId ++ "] sessionCounter[" ++ show sessionValue ++ "]" , 
+                   Map.insert  sessionId (sessionValue + 1) mstore )
+              base =  "counter[ " ++ show counter ++ "] <br><br> " ++
+                      "You have requested-- scheme[" ++ scheme ++ 
+                     "] path [" ++ path ++ "] query [" ++ query ++ 
+                     "] fragment ["++ fragment ++ "]" 
 
 
 ------------------------------------------------
