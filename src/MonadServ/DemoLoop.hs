@@ -27,7 +27,8 @@ data InternalServerState
    = InternalServerState
      { isLogEnabled    :: Bool
      , sock            :: Maybe Socket
-     , pool            :: Maybe (MVar WorkerPool)  }
+     , pool            :: Maybe (MVar WorkerPool)
+     , appEnv          :: Maybe Environment  }
 
 --type Environment = Int
 
@@ -35,7 +36,7 @@ data Environment = Environment { hitCounterMVar :: MVar Int
                                , store :: MVar (DataMap.Map String (MVar Int)) }
 --                   deriving (Show)
 
-defaultInternalServerState = InternalServerState { isLogEnabled = False, sock = Nothing, pool = Nothing }
+defaultInternalServerState = InternalServerState { isLogEnabled = False, sock = Nothing, pool = Nothing, appEnv = Nothing }
 
 initialEnvironment = do
     envMVar <- newMVar $ DataMap.empty
@@ -46,19 +47,19 @@ main = do
     (port:_) <- getArgs
     sck <- listenOn (PortNumber (fromIntegral (read port :: Int)))
     workerPoolMVar <- newMVar $ WorkerPool 0 [] []
-    let iss =  defaultInternalServerState { sock = Just sck, pool = Just workerPoolMVar }
+    initEnv <- initialEnvironment
+    let iss =  defaultInternalServerState { sock = Just sck, pool = Just workerPoolMVar, appEnv = Just initEnv }
     putStrLn $ "server is starting on port: " ++ show port
     runServer iss
 
 
 runServer :: InternalServerState -> IO ()
-runServer iss@(InternalServerState isLogEnabled (Just socket) (Just workerPoolMVar)) =  Ex.bracket setup exit loop
+runServer iss@(InternalServerState isLogEnabled (Just socket) (Just workerPoolMVar) (Just appEnv)) =  Ex.bracket setup exit loop
     where  setup = do putStrLn "ready for requests..."
                       return (socket, workerPoolMVar)
 
            loop (s, workerPoolMVar)  = do (sock', sockAddr) <- accept s
-                                          env <- initialEnvironment
-                                          WorkerThread _ chan <- getWorkerThread workerPoolMVar env
+                                          WorkerThread _ chan <- getWorkerThread workerPoolMVar appEnv
                                           writeChan chan sock'
                                           loop (s, workerPoolMVar)
 
@@ -79,10 +80,10 @@ workerLoop workerPoolMVar e chan
     where
       mainLoop e
           = do sock      <- readChan chan
+               hitCounter <- takeMVar (hitCounterMVar e)
+               putMVar (hitCounterMVar e) (hitCounter + 1)
                e' <- work sock e
                putWorkerThread workerPoolMVar chan
-               hitCounter <- takeMVar (hitCounterMVar e')
-               putMVar (hitCounterMVar e') (hitCounter + 1)
                mainLoop e'
 
 
