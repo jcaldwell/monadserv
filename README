@@ -1,4 +1,9 @@
 
+*****
+***** Reworking to include the changes from DemoLoop.hs
+*****
+*****
+
 monadServ - A server process that listens on a port for HTTP requests.  It parses the URL to find any defined commands.  These commands would be provided by a client application that maps monadic values onto URL commands.  No parameters are allowed right now.  If the command is not found then a docRoot variable is searched to find content to reply back over HTTP.
 
 OK - This is it.
