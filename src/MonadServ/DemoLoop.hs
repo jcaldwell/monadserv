@@ -31,15 +31,7 @@ data InternalServerState
 
 --type Environment = Int
 
-data EnvironmentMV = EnvironmentMV { hitCounter' :: Int
-                                   , store' :: MVar (DataMap.Map String (MVar Int))}
-
-
-initialMV = do
-    envMVar <- newMVar $ DataMap.empty
-    return $ EnvironmentMV 0 envMVar
-
-data Environment = Environment { hitCounter :: Int
+data Environment = Environment { hitCounterMVar :: MVar Int
                                , store :: MVar (DataMap.Map String (MVar Int)) }
 --                   deriving (Show)
 
@@ -47,7 +39,8 @@ defaultInternalServerState = InternalServerState { isLogEnabled = False, sock = 
 
 initialEnvironment = do
     envMVar <- newMVar $ DataMap.empty
-    return $ Environment 0 envMVar
+    cntrMVar <- newMVar 0
+    return $ Environment cntrMVar envMVar
 
 main = do
     (port:_) <- getArgs
@@ -88,7 +81,9 @@ workerLoop workerPoolMVar e chan
           = do sock      <- readChan chan
                e' <- work sock e
                putWorkerThread workerPoolMVar chan
-               mainLoop e'{hitCounter = (hitCounter e') + 1}
+               hitCounter <- takeMVar (hitCounterMVar e')
+               putMVar (hitCounterMVar e') (hitCounter + 1)
+               mainLoop e'
 
 
 work :: Socket -> Environment -> IO Environment
@@ -107,29 +102,34 @@ work sock' e  = do
     return e'
 
 handleRequest :: Request -> Environment -> IO (String, Environment)
-handleRequest req@(Request uri@(URI scheme _ path query fragment) _ _ _) e@(Environment counter storeMV) = do
+handleRequest req@(Request uri@(URI scheme _ path query fragment) _ _ _) e@(Environment counterMV storeMV) = do
     msessionId <- getParmValue "id" query
     mstore <- takeMVar storeMV
+    counter <- takeMVar counterMV
     (resultString, resultEnvironment) <-  case msessionId of
-                                                Nothing -> return $  handleNoSession mstore
+                                                Nothing -> return $  handleNoSession mstore counter
                                                 Just sessionId -> do
                                                               let sessionMV =  (Map.lookup sessionId mstore) :: Maybe (MVar Int)
-                                                              handleSession sessionId sessionMV mstore
+                                                              handleSession sessionId sessionMV mstore counter
     putMVar storeMV $ resultEnvironment
-    return (resultString, Environment counter storeMV )
-        where handleNoSession mstore = ("No Session: " ++ base , mstore )
-              handleSession sessionId Nothing mstore  = do
+    putMVar counterMV counter
+    return (resultString, Environment counterMV storeMV )
+        where handleNoSession mstore counter = ("No Session: " ++ base counter , mstore )
+
+              handleSession sessionId Nothing mstore counter  = do
                   sesMVar <- newMVar 1
-                  return $ (base ++  "   sesId [" ++ sessionId ++ "] sesCounter[--0--]"  , 
+                  return $ (base counter ++  "   sesId [" ++ sessionId ++ "] sesCounter[--0--]"  , 
                    Map.insert  sessionId  sesMVar mstore )
-              handleSession sessionId (Just sessionValueMV) mstore = do
+
+              handleSession sessionId (Just sessionValueMV) mstore counter = do
                   sessionValue <- takeMVar sessionValueMV
                   let sessionValue' = sessionValue + 1
-                  let (rS, rE)  = (base ++  "   sessionId [" ++ sessionId ++ "] sessionCounter[" ++ show sessionValue' ++ "]" , 
+                  let (rS, rE)  = (base counter ++  "   sessionId [" ++ sessionId ++ "] sessionCounter[" ++ show sessionValue' ++ "]" , 
                                         Map.insert  sessionId sessionValueMV mstore )
                   putMVar sessionValueMV  sessionValue'
                   return (rS, rE)
-              base =  "c[ " ++ show counter ++ "]  " ++  " query [" ++ query ++ "] "
+
+              base counter =  "c[ " ++ show counter ++ "]  " ++  " query [" ++ query ++ "] "
 
 
 --              base =  "counter[ " ++ show counter ++ "]  " ++
