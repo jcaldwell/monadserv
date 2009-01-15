@@ -2,63 +2,124 @@
 module MonadServ.RunServer where
 
 import Text.ParserCombinators.Parsec
-import qualified Text.ParserCombinators.Parsec.Prim as Prim
+--import qualified Text.ParserCombinators.Parsec.Prim as Prim
 import Data.Char
+import Data.Time
 import Data.Word
+import Data.List (union)
 import Control.Exception hiding (try)
 import qualified Control.Exception as Ex
-import Control.Concurrent.MVar     ( MVar, newEmptyMVar, tryTakeMVar, tryPutMVar, withMVar, takeMVar, putMVar )
-import Control.Monad               ( when, MonadPlus(..) )
-import Network
+import Control.Concurrent.MVar     ( MVar, newEmptyMVar, tryTakeMVar, tryPutMVar, withMVar, takeMVar, putMVar, newMVar )
+import Control.Concurrent.Chan     ( Chan, writeChan, readChan, newChan )
+import Control.Concurrent          ( forkIO, myThreadId )
+import Control.Monad               ( when, MonadPlus(..), join )
+import Numeric (readHex)
+import Network hiding (accept)
+import Network.Socket
+import Network.HTTP
+import Network.HTTP.Headers
+import Network.URI
 import System.IO
 import System.Directory
-import qualified Data.Map as DataMap
+import System.Locale
+import System.Time
+import qualified Data.Map as DataMap hiding (filter, union)
 import Data.ByteString as ByteString (readFile, unpack)
 import Text.PrettyPrint.HughesPJ hiding (char)
 
-import MonadServ.JSON
+import qualified MonadServ.JSON as JSON
 import MonadServ.HttpMonad
 import MonadServ.Types
 
 -- Entry Point
 runServer :: ServerConfig st -> ServerBackend bst -> st -> IO st
-runServer config backend init = Ex.bracket setup exit (\iss -> executeServer config backend iss init )
+runServer config backend i = Ex.bracket setup exit (\iss -> acceptLoop iss)
   where
       setup = do
-          evVar     <- newEmptyMVar
+          initEnv   <- initialEnvironment
+          workerPoolMVar <- newMVar $ WorkerPool 0 [] []
           thVar     <- newEmptyMVar
           bst       <- initBackend backend
-          sck       <- listenOn (PortNumber (fromIntegral $ port config))
-
+          sck       <- listenOn (PortNumber (fromIntegral $ mainPort config))
+          when (historyEnabled config) (do
+                                           putStrLn "Starting....")
           return InternalServerState
-                     { evalVar        = evVar
+                     { envVar         = initEnv
                      , evalTest       = thVar
                      , cancelHandler  = handleINT
                      , backendState   = bst
+                     , config         = config
                      , sock           = sck
+                     , initState      = i
+                     , pool = Just workerPoolMVar
                      }
 
-      exit iss = do
-            sClose (sock iss)
-            shutdownBackend backend (backendState iss)
-
-      executeServer :: ServerConfig st
-                    -> ServerBackend bst
-                    -> InternalServerState st bst
-                    -> st
-                    -> IO st
-      executeServer config backend iss init = do
-          when (historyEnabled config) (do
-             putStrLn "Starting....")
-
-          final <- serverLoop config backend iss init
-
-          when (historyEnabled config) (do
-             putStrLn "Stopping...")
-
+      exit iss = do          
 --        flushOutput backend (backendState iss)
-          return final
+          when (historyEnabled config) (do
+                                           putStrLn "Stopping...")
+          sClose (sock iss)
+          shutdownBackend backend (backendState iss)
 
+      acceptLoop  :: InternalServerState st bst -> IO st
+      acceptLoop iss = do (sock', sockAddr) <- accept (sock iss)
+                          WorkerThread _ chan <- getWorkerThread iss
+                          writeChan chan sock'
+                          acceptLoop iss
+
+------------------------------------------------
+-- | Worker stuff
+------------------------------------------------
+workerLoop :: InternalServerState st bst -> Chan Socket -> IO ()
+workerLoop iss@(InternalServerState {pool = (Just workerPoolMVar)}) chan
+    = do mainLoop iss
+    where
+        mainLoop iss
+            = do sock <- readChan chan
+                 iss' <- work sock iss
+                 putWorkerThread workerPoolMVar chan
+                 mainLoop iss'
+
+    
+work :: Socket -> InternalServerState st bst -> IO (InternalServerState st bst)
+work sock' iss = do
+    r <- getRequest sock'
+    iss' <- case r of
+                  Just req -> do
+                       putStrLn "request received"
+                       (result, iss') <- handleRequest req iss
+                       sendResponse sock' result
+                       return iss'
+                  Nothing -> do
+                       putStrLn "error caught..."
+                       return iss
+    sClose sock'
+    return iss'
+
+handleRequest :: Request -> InternalServerState st bst -> IO (String, InternalServerState st bst)
+handleRequest  req@(Request uri@(URI scheme _ path query fragment) _ _ _) iss
+   = do mSessionId <- getParmValue "id" query
+        store <- takeMVar (storeMVar (envVar iss))
+        (resultString, resultEnv) <- case mSessionId of
+                                           Nothing -> return $ handleNoSession store 
+                                           Just sessionId -> do let sessionEnv = (DataMap.lookup sessionId store) -- :: Maybe (MVar a)
+                                                                handleSession sessionId sessionEnv store iss
+        putMVar (storeMVar (envVar iss)) resultEnv
+        return (resultString, iss)
+    where handleNoSession store = ("NO SESSION", store)
+          handleSession sessionId Nothing store iss = 
+              do sesMVar <- newMVar $ (initState  ) iss
+                 return ("RUN 1" , DataMap.insert sessionId sesMVar store)
+          handleSession sessionId (Just sessionValueMV) store iss = 
+              do sessionValue <- takeMVar sessionValueMV
+                 let sessionValue' = id sessionValue
+                     (rs,rE) = ("RUN 2 " ++ sessionId ++ "  :", DataMap.insert sessionId sessionValueMV store)
+                 putMVar sessionValueMV sessionValue'
+                 return (rs, rE)
+
+
+
+{--
 
 serverLoop :: ServerConfig st -> ServerBackend bst -> InternalServerState st bst -> st -> IO st
 serverLoop config backend iss = loop
@@ -142,112 +203,123 @@ serverLoop config backend iss = loop
 	       write404 handle
        loop st'
 
-
+--}
 
 --what to do when we are interrupted.
 handleINT :: IO ()
 handleINT = return ()
 
-----------------------------------------
-octetsToString :: [Word8] -> String
-octetsToString = map (toEnum . fromIntegral)
 
-mimeMapping :: DataMap.Map String (String,Bool)
-mimeMapping=DataMap.fromList[("swf",("application/x-shockwave-flash",True)),
-	("html",("text/html",False)),("xml",("text/xml",False))]
+------------------------------------------------
+-- | Worker Pool stuff
+------------------------------------------------
 
-getExtension:: FilePath -> String
-getExtension s=map toLower (reverse (takeWhile (/= '.') (reverse s)))
+getWorkerThread  :: InternalServerState st bst -> IO WorkerThread
+getWorkerThread iss@(InternalServerState {pool = (Just mv) } )  = 
+  do wp <- takeMVar mv
+     case wp of
+       WorkerPool n [] bs -> 
+         do chan <- newChan
+            tid <- forkIO $ workerLoop iss chan
+            let workerThread = WorkerThread tid chan 
+            expiresTime <- getCurrentTime >>= \utct -> return $ addUTCTime (fromInteger stdTimeOut) utct
+            putMVar mv $ WorkerPool (n+1) [] ((workerThread, expiresTime):bs)
+            return workerThread
+       WorkerPool n (idle:idles) busies ->
+         do expiresTime <- getCurrentTime >>= \utct -> return $ addUTCTime (fromInteger stdTimeOut) utct
+            putMVar mv $ WorkerPool n idles ((idle, expiresTime):busies)
+            return idle
 
-parseRequest :: Parser (Operation,URL,Headers,MsgContent)
-parseRequest = do
-	op <- many1 letter <?> "operation"
-	skipMany (char ' ')
-	url <- manyTill anyChar (Prim.try (char ' '))
-	manyTill anyChar (Prim.try pCRLF)
-	headM <- manyTill parseHeaders (Prim.try pCRLF)
-	let headers=DataMap.fromList headM
-	let cl=DataMap.lookup "content-length" headers
-	case cl of
-		Nothing -> do
-			--content <- manyTill anyChar (Prim.try pCRLF)
-			return (op,url,headers,"")
-		Just c -> do
-			content <- count (atoi c) anyChar
-			return (op,url,headers,content)
-
-
-atoi :: String -> Int
-atoi s=foldl (\ y x -> Data.Char.digitToInt(x) + (y*10)) 0 s
-
-parseHeaders :: Parser (String,String)
-parseHeaders = do
-	name <- many (noneOf ":\n\r") <?> "header name"
-	let nameL=map toLower name
-	char ':' <?> ": after header name"
-	skipMany (char ' ')
-	value <- many (noneOf "\n\r") <?> "header value"
-	pCRLF <?> "line after header"
-	return (nameL,value)
-
-{-
-testParseHeaders = do
-	let parseResult=parse parseRequest "request" "GET / HTTP/1.1\r\nName: Value\r\nName2: Value2\r\n\r\ncontent"
-	case parseResult of
-		Left err -> show err
-		Right (op,url,headers,content) -> show ("op:"++op++"\nurl:"++url++ "\nheaders:"++(show (DataMap.toList headers))++ "\ncontent:"++content)
-	-}
-
--- | RFC 2616 CRLF
-pCRLF :: Parser String
-pCRLF = try (string "\r\n" <|> string "\n\r") <|> string "\n" <|> string "\r"
-
-crossDomain :: String
-crossDomain = "<?xml version=\"1.0\"?><cross-domain-policy><allow-access-from domain=\"*\" to-ports=\"9000\" secure=\"false\"/></cross-domain-policy>"
-
-writeContent :: Handle -> String -> String -> Bool -> IO()
-writeContent handle ctype content cache= do
-	hPutStr handle "HTTP/1.1 200 OK\r\n"
-	hPutStr handle "Server: Haskell Server\r\n"
-	hPutStr handle ("Content-Type: "++ctype++"\r\n")
-	hPutStr handle ("Content-Length: "++(show (length content))++"\r\n")
-	if not cache
-		then do
-			hPutStr handle ("Cache-Control: no-cache\r\n") --HTTP 1.1
-			hPutStr handle ("Pragma: no-cache\r\n") --HTTP 1.0
-			hPutStr handle ("Expires: 0\r\n") --prevents caching at the proxy server
-		else do
-			return ()
-	hPutStr handle "\r\n"
-	hPutStr handle content
-	hPutStr handle "\r\n"
-	hPutStr handle "\r\n"
-
-write404 :: Handle -> IO()
-write404 handle = do
-	hPutStr handle "HTTP/1.1 404 Not Found\r\n"
-	hPutStr handle "\r\n"
-	hPutStr handle "\r\n"
-	hPutStr handle "\r\n"
-
-write500 :: Handle -> String -> IO()
-write500 handle message= do
-	hPutStr handle "HTTP/1.1 500 Internal Server Error\r\n"
-	hPutStr handle ("Content-Type: text/plain\r\n")
-	hPutStr handle "\r\n"
-	hPutStr handle message
-	hPutStr handle "\r\n"
-	hPutStr handle "\r\n"
-
-type Operation = String
-type URL = String
-type Headers= DataMap.Map String String
-type MsgContent = String
-
-data Request = Request { operation  :: Operation
-                       , url        :: URL
-                       , headers    :: Headers
-                       , msgContent :: MsgContent
-                       }
+putWorkerThread mv chan = do
+               WorkerPool n is bs <- takeMVar mv
+               mytid <- myThreadId
+               let bs' = filter (\(WorkerThread tid _, _) -> tid /= mytid) bs
+               putMVar mv $ WorkerPool n ((WorkerThread mytid chan):is) bs'
 
 
+{--
+timeout :: Int -> ThreadId -> IO ()
+timeout time thid
+    = do threadDelay time
+         throwTurbinadoTo thid TimedOut
+--}
+
+-- conf. files? Indeed! haha
+stdTimeOut :: Integer
+stdTimeOut = 90
+
+
+------------------------------------------------
+-- | HTTP Stuff
+------------------------------------------------
+
+getRequest :: Socket  -> IO (Maybe Request)
+getRequest sock = do
+    req <- receiveHTTP sock
+    case req of
+          Left _ -> return Nothing
+          Right r -> return $ Just r
+
+sendResponse :: Socket -> String -> IO ()
+sendResponse sock xs = do t <- getClockTime
+                          let resp = Response (2,0,0) "OK" (buildHeaders (Just $ length xs) t []) (xs)
+                          respondHTTP sock resp
+
+
+buildHeaders :: Maybe Int -> ClockTime -> [Header] -> [Header]
+buildHeaders Nothing  t hdrs = union hdrs ( startingHeaders t)
+buildHeaders (Just l) t hdrs = union hdrs ((startingHeaders t) ++
+                                [Header HdrContentLength $ show l]) 
+
+startingHeaders t = [ Header HdrServer "Jaxclipse  www.jaxclipse.com"
+                    , Header HdrContentType "text/html; charset=UTF-8"
+                    , Header HdrDate $ formatCalendarTime defaultTimeLocale rfc822DateFormat $ toUTCTime t
+                    ]
+
+instance Eq Header where
+  (==) (Header hn1 _) (Header hn2 _) = hn1 == hn2
+
+
+
+------------------------------------------------
+-- | Parsec Stuff
+------------------------------------------------
+
+
+p_query :: CharParser () [(String, Maybe String)]
+p_query = char '?' >> p_pair `sepBy` char '&'
+
+p_pair :: CharParser () (String, Maybe String)
+p_pair = do
+  name <- many1 p_char
+  value <- optionMaybe (char '=' >> many p_char)
+  return (name, value)
+
+p_char :: CharParser () Char
+p_char = oneOf urlBaseChars
+     <|> (char '+' >> return ' ')
+     <|> p_hex
+
+urlBaseChars = ['a'..'z']++['A'..'Z']++['0'..'9']++"$-_.!*'(),"
+
+p_hex :: CharParser () Char
+p_hex = do
+  char '%'
+  a <- hexDigit
+  b <- hexDigit
+  let ((d, _):_) = readHex [a,b]
+  return . toEnum $ d
+
+
+parseParms :: String -> IO ( Maybe ( DataMap.Map String  (Maybe String)))
+parseParms  input = do
+    let result = parse p_query "(unknown)" input
+    case result of
+          Left e -> return Nothing
+          Right m -> return $ Just $ DataMap.fromList m
+
+getParmValue parm input = do
+    parseResult <- parseParms input
+    case parseResult of
+          Nothing -> return Nothing
+          Just m ->  return $ join $  DataMap.lookup parm m

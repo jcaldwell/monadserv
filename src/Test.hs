@@ -32,7 +32,7 @@ myShell init = do
     let
       desc =
          (mkServerConfig commands )
-         { port  = 8080
+         { mainPort  = 8080
          , docRoot = "/var/www/"
          }
     runServer desc (templateBackend "JSON") init

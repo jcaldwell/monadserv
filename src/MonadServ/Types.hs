@@ -2,7 +2,10 @@
 module MonadServ.Types where
 
 import Data.Maybe
-import Control.Concurrent.MVar     ( MVar, newEmptyMVar, tryTakeMVar, tryPutMVar, withMVar, takeMVar, putMVar )
+import qualified Data.Map as DataMap
+--import Control.Concurrent.MVar     (  MVar, newEmptyMVar, tryTakeMVar, tryPutMVar, withMVar, takeMVar, putMVar, newMVar )
+--import Control.Concurrent (ThreadId)
+import Control.Concurrent
 import Network
 import System.IO   ( stdout, stderr, stdin, hFlush, hPutStr, hPutStrLn
 	           , hGetLine, hGetChar, hGetBuffering, hSetBuffering, Handle
@@ -10,6 +13,7 @@ import System.IO   ( stdout, stderr, stdin, hFlush, hPutStr, hPutStrLn
                    )
 
 import MonadServ.HttpMonad
+import Data.Time
 
 type ServerCommand st = ( String , ServerConfig st -> Srv st () )
 --type ServerCommand = (String, String )
@@ -25,17 +29,29 @@ data ServerConfig st
 --   , historyFile        :: Maybe FilePath         
    , maxHistoryEntries  :: Int                      
    , historyEnabled     :: Bool                     
-   , port               :: Int
+   , mainPort           :: Int
    , docRoot            :: FilePath                                                    
    } 
 
+data Environment st = Environment { hitCounterMVar :: MVar Int
+                                 , storeMVar :: MVar (DataMap.Map String (MVar st))}
+
+initialEnvironment = do
+    hitCounterMVar <- newMVar 0
+    storeMVar <- newMVar $ DataMap.empty
+    return $ Environment hitCounterMVar storeMVar
+
+
 data InternalServerState st bst
    = InternalServerState
-     { evalVar         :: MVar (Maybe (st))
+     { envVar          :: Environment st
      , evalTest        :: MVar String
      , cancelHandler   :: IO ()
      , backendState    :: bst
+     , initState       :: st
+     , config          :: ServerConfig st
      , sock            :: Socket
+     , pool            :: Maybe (MVar WorkerPool)
      }
 
 data ServerBackend bst
@@ -94,7 +110,7 @@ templateServerConfig =  SrvDesc
    , beforePrompt       = srvPutStrLn  "waiting for request...(before connection accepted.)"
    , maxHistoryEntries  = 0
    , historyEnabled     = True
-   , port               = 8080
+   , mainPort               = 8080
    , docRoot            = "/var/www/"                                                    
    }
 
@@ -102,9 +118,7 @@ templateServerConfig =  SrvDesc
 
 -- | Creates a simple shell description from a list of shell commmands and
 --   an evalation function.
-mkServerConfig :: [ServerCommand st]
-                     -> ServerConfig st
-
+mkServerConfig :: [ServerCommand st] ->  ServerConfig st
 mkServerConfig cmds =
    templateServerConfig
       { serverCommands = cmds
@@ -117,4 +131,12 @@ basicOutput (Just handle) out = do
     hPutStr handle out
 basicOutput Nothing out = hPutStr stdout out
 
+
+
+
+type ExpiresTime = UTCTime
+data WorkerThread = WorkerThread ThreadId (Chan Socket)
+data WorkerPool = WorkerPool { numWorkers :: Int,
+                               idleWorkers :: [WorkerThread],
+                               busyWorkers :: [(WorkerThread, ExpiresTime)]}
 
