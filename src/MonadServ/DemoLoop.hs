@@ -76,33 +76,31 @@ workerLoop :: MVar WorkerPool ->
               Chan Socket     ->
               IO ()
 workerLoop workerPoolMVar e chan
-    = do mainLoop e
+    = do mainLoop 
     where
-      mainLoop e
+      mainLoop 
           = do sock      <- readChan chan
                hitCounter <- takeMVar (hitCounterMVar e)
                putMVar (hitCounterMVar e) (hitCounter + 1)
-               e' <- work sock e
+               work sock e
                putWorkerThread workerPoolMVar chan
-               mainLoop e'
+               mainLoop 
 
 
-work :: Socket -> Environment -> IO Environment
+work :: Socket -> Environment -> IO ()
 work sock' e  = do
     r <- getRequest sock'
-    e' <- case r of
-                Just req -> do 
-                     putStrLn "request received"
-                     (result, e') <- handleRequest req e
-                     sendResponse sock' result
-                     return e'
-                Nothing -> do 
+    case r of
+          Just req -> do 
+                    putStrLn "request received"
+                    result <- handleRequest req e
+                    sendResponse sock' result
+          Nothing -> do 
                      putStrLn "error caught..."
-                     return e
     sClose sock'
-    return e'
 
-handleRequest :: Request -> Environment -> IO (String, Environment)
+
+handleRequest :: Request -> Environment -> IO String
 handleRequest req@(Request uri@(URI scheme _ path query fragment) _ _ _) e@(Environment counterMV storeMV) = do
     msessionId <- getParmValue "id" query
     mstore <- takeMVar storeMV
@@ -114,7 +112,7 @@ handleRequest req@(Request uri@(URI scheme _ path query fragment) _ _ _) e@(Envi
                                                               handleSession sessionId sessionMV mstore counter
     putMVar storeMV $ resultEnvironment
     putMVar counterMV counter
-    return (resultString, Environment counterMV storeMV )
+    return resultString
         where handleNoSession mstore counter = ("No Session: " ++ base counter , mstore )
 
               handleSession sessionId Nothing mstore counter  = do
@@ -130,7 +128,7 @@ handleRequest req@(Request uri@(URI scheme _ path query fragment) _ _ _) e@(Envi
                   putMVar sessionValueMV  sessionValue'
                   return (rS, rE)
 
-              base counter =  "c[ " ++ show counter ++ "]  " ++  " query [" ++ query ++ "] "
+              base counter =  "c[ " ++ show counter ++ "]  " ++  " query [" ++ query ++ "] path["++ path ++ "] "
 
 
 --              base =  "counter[ " ++ show counter ++ "]  " ++

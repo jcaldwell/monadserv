@@ -2,7 +2,7 @@
 module MonadServ.RunServer where
 
 import Text.ParserCombinators.Parsec
---import qualified Text.ParserCombinators.Parsec.Prim as Prim
+import qualified Text.ParserCombinators.Parsec.Prim as Prim
 import Data.Char
 import Data.Time
 import Data.Word
@@ -48,6 +48,7 @@ runServer config backend i = Ex.bracket setup exit (\iss -> acceptLoop iss)
                      , evalTest       = thVar
                      , cancelHandler  = handleINT
                      , backendState   = bst
+                     , backendService = backend
                      , config         = config
                      , sock           = sck
                      , initState      = i
@@ -72,31 +73,29 @@ runServer config backend i = Ex.bracket setup exit (\iss -> acceptLoop iss)
 ------------------------------------------------
 workerLoop :: InternalServerState st bst -> Chan Socket -> IO ()
 workerLoop iss@(InternalServerState {pool = (Just workerPoolMVar)}) chan
-    = do mainLoop iss
+    = do mainLoop
     where
-        mainLoop iss
+        mainLoop 
             = do sock <- readChan chan
-                 iss' <- work sock iss
+                 work sock iss
                  putWorkerThread workerPoolMVar chan
-                 mainLoop iss'
+                 mainLoop 
 
     
-work :: Socket -> InternalServerState st bst -> IO (InternalServerState st bst)
+work :: Socket -> InternalServerState st bst -> IO ()
 work sock' iss = do
     r <- getRequest sock'
-    iss' <- case r of
-                  Just req -> do
-                       putStrLn "request received"
-                       (result, iss') <- handleRequest req iss
-                       sendResponse sock' result
-                       return iss'
-                  Nothing -> do
-                       putStrLn "error caught..."
-                       return iss
+    case r of
+          Just req -> do
+                     putStrLn "request received"
+                     result <- handleRequest req iss
+                     sendResponse sock' result
+          Nothing -> do
+                     putStrLn "error caught..."
     sClose sock'
-    return iss'
 
-handleRequest :: Request -> InternalServerState st bst -> IO (String, InternalServerState st bst)
+
+handleRequest :: Request -> InternalServerState st bst -> IO String
 handleRequest  req@(Request uri@(URI scheme _ path query fragment) _ _ _) iss
    = do mSessionId <- getParmValue "id" query
         store <- takeMVar (storeMVar (envVar iss))
@@ -105,17 +104,47 @@ handleRequest  req@(Request uri@(URI scheme _ path query fragment) _ _ _) iss
                                            Just sessionId -> do let sessionEnv = (DataMap.lookup sessionId store) -- :: Maybe (MVar a)
                                                                 handleSession sessionId sessionEnv store iss
         putMVar (storeMVar (envVar iss)) resultEnv
-        return (resultString, iss)
+        return resultString
     where handleNoSession store = ("NO SESSION", store)
-          handleSession sessionId Nothing store iss = 
-              do sesMVar <- newMVar $ (initState  ) iss
-                 return ("RUN 1" , DataMap.insert sessionId sesMVar store)
-          handleSession sessionId (Just sessionValueMV) store iss = 
+          handleSession sessionId Nothing store iss  = 
+              do let newState = initState iss
+                 (result, s) <- runRequest (tail path) newState iss False
+                 sesMVar <- newMVar s
+                 return (result , DataMap.insert sessionId sesMVar store)
+          handleSession sessionId (Just sessionValueMV) store iss  = 
               do sessionValue <- takeMVar sessionValueMV
-                 let sessionValue' = id sessionValue
-                     (rs,rE) = ("RUN 2 " ++ sessionId ++ "  :", DataMap.insert sessionId sessionValueMV store)
-                 putMVar sessionValueMV sessionValue'
+                 (result,s) <- runRequest (tail path) sessionValue iss True
+                 putMVar sessionValueMV s
+                 let (rs,rE) = (result , DataMap.insert sessionId sessionValueMV store)
                  return (rs, rE)
+
+runRequest :: String -> st -> InternalServerState st bst -> Bool -> IO (String,st)
+runRequest u st iss flag = do
+    putStrLn ("flag: " ++ show flag)
+    runRequest' u st iss
+
+runRequest' :: String -> st -> InternalServerState st bst -> IO (String,st)
+runRequest' u st iss@(InternalServerState {backendState = bst, config = config', backendService = bservice}) = do
+    runSrv st (outputString bservice bst Nothing) (beforePrompt config')
+    case lookup u (serverCommands config') of
+          Just f -> executeCommand u st f
+          Nothing -> serveContent  st
+    where executeCommand url' st' f = do
+              runSrv st' (outputString bservice bst Nothing) (srvPutStrLn $ "--- url[" ++ url' ++ "]")
+              (st'', x) <- runSrvSpecial st' Nothing (outputString bservice bst Nothing) (f config')
+              case x of
+                    Just res -> do
+--                         let parseResult = "xyz"
+                         let  parseResult = renderStyle (style {mode=OneLineMode}) (JSON.toDoc res)
+                         runSrv st' (outputString bservice bst Nothing) (srvPutStrLn $ "testCallback(" ++ parseResult ++");")
+                         return (parseResult, st'')
+                    Nothing -> do
+                         let result = " returns no JSON Object."
+                         runSrv st' (outputString bservice bst Nothing) (srvPutStrLn $ "::" ++ result)
+                         return (result, st'')
+          serveContent st' = do
+              return ("get some content from docroot here....", st')
+              
 
 
 

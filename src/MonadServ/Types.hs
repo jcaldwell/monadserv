@@ -48,6 +48,7 @@ data InternalServerState st bst
      , evalTest        :: MVar String
      , cancelHandler   :: IO ()
      , backendState    :: bst
+     , backendService  :: ServerBackend bst
      , initState       :: st
      , config          :: ServerConfig st
      , sock            :: Socket
