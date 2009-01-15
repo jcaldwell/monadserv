@@ -101,7 +101,7 @@ work sock' e  = do
 
 
 handleRequest :: Request -> Environment -> IO String
-handleRequest req@(Request uri@(URI scheme _ path query fragment) _ _ _) e@(Environment counterMV storeMV) = do
+handleRequest req@(Request uri@(URI _ _ path query fragment) rqmethod _ rqbody ) e@(Environment counterMV storeMV) = do
     msessionId <- getParmValue "id" query
     mstore <- takeMVar storeMV
     counter <- takeMVar counterMV
@@ -128,7 +128,7 @@ handleRequest req@(Request uri@(URI scheme _ path query fragment) _ _ _) e@(Envi
                   putMVar sessionValueMV  sessionValue'
                   return (rS, rE)
 
-              base counter =  "c[ " ++ show counter ++ "]  " ++  " query [" ++ query ++ "] path["++ path ++ "] "
+              base counter =  "method [" ++ show rqmethod ++"] c[ " ++ show counter ++ "]  " ++  " query [" ++ query ++ "] path["++ path ++ "]  body[" ++ rqbody ++"] " 
 
 
 --              base =  "counter[ " ++ show counter ++ "]  " ++

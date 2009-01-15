@@ -96,7 +96,7 @@ work sock' iss = do
 
 
 handleRequest :: Request -> InternalServerState st bst -> IO String
-handleRequest  req@(Request uri@(URI scheme _ path query fragment) _ _ _) iss
+handleRequest  req@(Request uri@(URI scheme _ path query fragment) _ _ rqBody) iss
    = do mSessionId <- getParmValue "id" query
         store <- takeMVar (storeMVar (envVar iss))
         (resultString, resultEnv) <- case mSessionId of
@@ -108,33 +108,33 @@ handleRequest  req@(Request uri@(URI scheme _ path query fragment) _ _ _) iss
     where handleNoSession store = ("NO SESSION", store)
           handleSession sessionId Nothing store iss  = 
               do let newState = initState iss
-                 (result, s) <- runRequest (tail path) newState iss False
+                 (result, s) <- runRequest rqBody (tail path) newState iss False
                  sesMVar <- newMVar s
                  return (result , DataMap.insert sessionId sesMVar store)
           handleSession sessionId (Just sessionValueMV) store iss  = 
               do sessionValue <- takeMVar sessionValueMV
-                 (result,s) <- runRequest (tail path) sessionValue iss True
+                 (result,s) <- runRequest rqBody (tail path) sessionValue iss True
                  putMVar sessionValueMV s
                  let (rs,rE) = (result , DataMap.insert sessionId sessionValueMV store)
                  return (rs, rE)
 
-runRequest :: String -> st -> InternalServerState st bst -> Bool -> IO (String,st)
-runRequest u st iss flag = do
+runRequest :: String -> String -> st -> InternalServerState st bst -> Bool -> IO (String,st)
+runRequest rqBody u st iss flag = do
     putStrLn ("flag: " ++ show flag)
-    runRequest' u st iss
+    runRequest' rqBody u st iss
 
-runRequest' :: String -> st -> InternalServerState st bst -> IO (String,st)
-runRequest' u st iss@(InternalServerState {backendState = bst, config = config', backendService = bservice}) = do
+runRequest' :: String -> String -> st -> InternalServerState st bst -> IO (String,st)
+runRequest' rqBody u st iss@(InternalServerState {backendState = bst, config = config', backendService = bservice}) = do
     runSrv st (outputString bservice bst Nothing) (beforePrompt config')
     case lookup u (serverCommands config') of
           Just f -> executeCommand u st f
           Nothing -> serveContent  st
     where executeCommand url' st' f = do
               runSrv st' (outputString bservice bst Nothing) (srvPutStrLn $ "--- url[" ++ url' ++ "]")
-              (st'', x) <- runSrvSpecial st' Nothing (outputString bservice bst Nothing) (f config')
+              let parseResult= JSON.parse rqBody
+              (st'', x) <- runSrvSpecial st' parseResult (outputString bservice bst Nothing) (f config')
               case x of
                     Just res -> do
---                         let parseResult = "xyz"
                          let  parseResult = renderStyle (style {mode=OneLineMode}) (JSON.toDoc res)
                          runSrv st' (outputString bservice bst Nothing) (srvPutStrLn $ "testCallback(" ++ parseResult ++");")
                          return (parseResult, st'')
@@ -145,8 +145,6 @@ runRequest' u st iss@(InternalServerState {backendState = bst, config = config',
           serveContent st' = do
               return ("get some content from docroot here....", st')
               
-
-
 
 {--
 

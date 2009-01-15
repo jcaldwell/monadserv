@@ -5,34 +5,32 @@
 module MonadServ.HttpMonad where
 
 import qualified Control.Exception as Ex
-
 import Control.Monad.Reader
 import Control.Monad.State
 import System.IO
-
 import MonadServ.JSONObject
 import MonadServ.JSON
 
 type BackendOutput =   String
 
--- | The type of results from shell commands.  They are a modified
---   shell state and possibly a shell \"special\" action to execute.
+-- | The type of results from server commands.  They are a modified
+--   server state and possibly a server \"special\" action to execute.
 --type CommandResult st = (st,Maybe (ServerSpecial st))
 --type CommandResult st = (st, Maybe String)
 type CommandResult st  = (st, Maybe Value )
 
 
--- | The type of commands which produce output on the shell console.
+-- | The type of commands which produce output for the server.
 --   Changed to String from BackendOutput for now.
 type OutputCommand = BackendOutput  -> IO ()
 
--- | The type of shell commands.  This monad is a state monad layered over @IO@.
+-- | The type of server commands.  This monad is a state monad layered over @IO@.
 --   The type parameter @st@ allows the monad to carry around a package of
 --   user-defined state.
 newtype Srv st a = Srv { unSrv :: StateT (CommandResult st) (ReaderT OutputCommand IO) a }
    deriving (Monad, MonadIO)
 
--- | Special commands for the shell framework.
+-- | Special commands for the server framework.
 data ServerSpecial st
   = ServerExit                  -- ^ Causes the shell to exit
   | ServerHelp (Maybe String)   -- ^ Causes the shell to print an informative message.
@@ -65,15 +63,15 @@ srvPutStr  = srvPut
 srvPutStrLn :: String -> Srv st ()
 srvPutStrLn = srvPutStr . (++"\n")
 
--- | Get the current shell state
+-- | Get the current server state
 getSrvSt :: Srv st st
 getSrvSt = Srv (get >>= return . fst)
 
--- | Set the shell state
+-- | Set the server state
 putSrvSt :: st -> Srv st ()
 putSrvSt st = Srv (get >>= \ (_,spec) -> put (st,spec))
 
--- | Apply the given funtion to the shell state
+-- | Apply the given funtion to the server state
 modifySrvSt :: (st -> st) -> Srv st ()
 modifySrvSt f = getSrvSt >>= putSrvSt . f
 
