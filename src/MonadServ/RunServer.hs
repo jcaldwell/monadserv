@@ -98,37 +98,38 @@ work sock' iss = do
 handleRequest :: Request -> InternalServerState st bst -> IO String
 handleRequest  req@(Request uri@(URI scheme _ path query fragment) _ _ rqBody) iss
    = do mSessionId <- getParmValue "id" query
+        mfunction <- getParmValue "function" query
         store <- takeMVar (storeMVar (envVar iss))
         (resultString, resultEnv) <- case mSessionId of
                                            Nothing -> return $ handleNoSession store 
                                            Just sessionId -> do let sessionEnv = (DataMap.lookup sessionId store) -- :: Maybe (MVar a)
-                                                                handleSession sessionId sessionEnv store iss
+                                                                handleSession sessionId sessionEnv store iss mfunction
         putMVar (storeMVar (envVar iss)) resultEnv
         return resultString
     where handleNoSession store = ("NO SESSION", store)
-          handleSession sessionId Nothing store iss  = 
+          handleSession sessionId Nothing store iss mfunction  = 
               do let newState = initState iss
-                 (result, s) <- runRequest rqBody (tail path) newState iss False
+                 (result, s) <- runRequest rqBody (tail path) newState iss mfunction False
                  sesMVar <- newMVar s
                  return (result , DataMap.insert sessionId sesMVar store)
-          handleSession sessionId (Just sessionValueMV) store iss  = 
+          handleSession sessionId (Just sessionValueMV) store iss mfunction  = 
               do sessionValue <- takeMVar sessionValueMV
-                 (result,s) <- runRequest rqBody (tail path) sessionValue iss True
+                 (result,s) <- runRequest rqBody (tail path) sessionValue iss mfunction True
                  putMVar sessionValueMV s
                  let (rs,rE) = (result , DataMap.insert sessionId sessionValueMV store)
                  return (rs, rE)
 
-runRequest :: String -> String -> st -> InternalServerState st bst -> Bool -> IO (String,st)
-runRequest rqBody u st iss flag = do
+runRequest :: String -> String -> st -> InternalServerState st bst -> Maybe String -> Bool -> IO (String,st)
+runRequest rqBody u st iss mfunction flag = do
     putStrLn ("flag: " ++ show flag)
-    runRequest' rqBody u st iss
+    runRequest' rqBody u st iss mfunction
 
-runRequest' :: String -> String -> st -> InternalServerState st bst -> IO (String,st)
-runRequest' rqBody u st iss@(InternalServerState {backendState = bst, config = config', backendService = bservice}) = do
+runRequest' :: String -> String -> st -> InternalServerState st bst -> Maybe String -> IO (String,st)
+runRequest' rqBody u st iss@(InternalServerState {backendState = bst, config = config', backendService = bservice}) mfunction = do
     runSrv st (outputString bservice bst Nothing) (beforePrompt config')
     case lookup u (serverCommands config') of
           Just f -> executeCommand u st f
-          Nothing -> serveContent  st
+          Nothing -> serveContent u  st
     where executeCommand url' st' f = do
               runSrv st' (outputString bservice bst Nothing) (srvPutStrLn $ "--- url[" ++ url' ++ "]")
               let parseResult= JSON.parse rqBody
@@ -136,101 +137,39 @@ runRequest' rqBody u st iss@(InternalServerState {backendState = bst, config = c
               case x of
                     Just res -> do
                          let  parseResult = renderStyle (style {mode=OneLineMode}) (JSON.toDoc res)
-                         runSrv st' (outputString bservice bst Nothing) (srvPutStrLn $ "testCallback(" ++ parseResult ++");")
-                         return (parseResult, st'')
+                              parseResult' = case mfunction of
+                                                   Just function -> function ++"("++parseResult ++");"
+                                                   Nothing -> parseResult
+                         runSrv st' (outputString bservice bst Nothing) (srvPutStrLn parseResult')
+                         return (parseResult', st'')
                     Nothing -> do
                          let result = " returns no JSON Object."
                          runSrv st' (outputString bservice bst Nothing) (srvPutStrLn $ "::" ++ result)
                          return (result, st'')
-          serveContent st' = do
-              return ("get some content from docroot here....", st')
-              
-
-{--
-
-serverLoop :: ServerConfig st -> ServerBackend bst -> InternalServerState st bst -> st -> IO st
-serverLoop config backend iss = loop
- where
-   bst = backendState iss
-
---   loop :: st -> IO st
-   loop st = do
----       flushOutput bst bst
-       runSrv st (outputString backend bst Nothing) (beforePrompt config) 
-       (handle,hostName,portNumber) <- accept $ sock iss
-
-       inp <- getInput handle hostName
-
-       case inp  of
-             Nothing -> return st
-             Just request@(Request op url hdrs msg) -> handleInput handle request st
-
-
-
-   getInput :: Handle -> String -> IO (Maybe Request)
-   getInput handle hostName = do
-       x <- Control.Exception.catch (do
-		s <- hGetContents handle
---                putStrLn $ "contents [" ++ s  ++ "]"
-		let parseResult=Text.ParserCombinators.Parsec.parse parseRequest "request" s
-		case parseResult of
-		      Left err -> do
-			hPutStrLn handle (show err)
-			return Nothing
-		      Right (operation, url, headers, msgcontent)  -> do
-                        return $ Just (Request operation url headers msgcontent)
-		)
-                (\e -> do
-		     write500 handle (show e)
-		     return Nothing
-		)
-       return x
+          serveContent url'  st' = do
+              runSrv st' (outputString bservice  bst Nothing) (srvPutStrLn $ " [" ++ "OP" ++"] " ++ url' ++ " --" )
+              let fileName= docRoot config' ++ url'
+              exists <- doesFileExist (fileName)
+              if exists
+	        then do
+                      let (mimetype,binary)= case DataMap.lookup (getExtension url') mimeMapping of
+					           Nothing -> ("text/plain",False)
+                                                   Just (s,b) -> (s,b)
+	              if binary
+		        then do
+                              result <- ByteString.readFile (fileName)
+		             -- (encode (unpackList result))
+		             -- writeContent handle mimetype (octetsToString (unpackList result)) False
+                              --writeContent handle mimetype (octetsToString (unpack result)) False
+                              return  ( octetsToString (unpack result), st')
+		        else do
+		              result <- System.IO.readFile (fileName)
+                              return ("BINARY FILE",st')
+--		              writeContent handle mimetype result False
+	        else do
+	              return ("404 Not FOUND",st')
 
 
-   handleInput handle request@(Request op url hdrs msg) st' = do
-       case lookup (tail url) (serverCommands config) of
-           Just f -> executeCommand handle request st' f
-           Nothing -> serveContent handle request st'
-
-
-
-   executeCommand handle r@(Request op url hdrs msg) st' f = do
-       runSrv st' (outputString backend bst Nothing) (srvPutStrLn $ op ++ ": [" ++ url ++ "]")
-       let parseResult= MonadServ.JSON.parse msg
-       (st'' , x) <- runSrvSpecial st' parseResult (outputString backend bst (Just handle)) (f config)
---       (st'', x) <- runSrv st' (outputString backend bst (Just handle)) (f config)
-
-       case x of
-             Just res -> do
-                 let  parseResult = renderStyle (style {mode=OneLineMode}) (toDoc res)
-                 runSrv st' (outputString backend bst (Just handle)) (srvPutStrLn $ "testCallback(" ++ parseResult ++ ");")
-             Nothing -> runSrv st' (outputString backend bst Nothing) (srvPutStrLn $ url ++ " returns no JSON Object.")
-       hClose handle
-       loop st''
-
-   serveContent handle r@(Request op url hdrs msg) st' = do
-       runSrv st' (outputString backend bst Nothing) (srvPutStrLn $ " [" ++ op ++"] " ++ url ++ " --" )
-       let fileName=docRoot config ++ url
-       exists <- doesFileExist (fileName)
-       if exists
-	 then do
-               let (mimetype,binary)= case DataMap.lookup (getExtension url) mimeMapping of
-					    Nothing -> ("text/plain",False)
-                                            Just (s,b) -> (s,b)
-	       if binary
-		 then do
-                       result <- ByteString.readFile (fileName)
-		       -- (encode (unpackList result))
-		       -- writeContent handle mimetype (octetsToString (unpackList result)) False
-                       writeContent handle mimetype (octetsToString (unpack result)) False
-		 else do
-		       result <- System.IO.readFile (fileName)
-		       writeContent handle mimetype result False
-	 else do
-	       write404 handle
-       loop st'
-
---}
 
 --what to do when we are interrupted.
 handleINT :: IO ()
@@ -350,3 +289,15 @@ getParmValue parm input = do
     case parseResult of
           Nothing -> return Nothing
           Just m ->  return $ join $  DataMap.lookup parm m
+
+
+octetsToString :: [Word8] -> String
+octetsToString = map (toEnum . fromIntegral)
+ 
+mimeMapping :: DataMap.Map String (String,Bool)
+mimeMapping=DataMap.fromList[("swf",("application/x-shockwave-flash",True)),
+  ("html",("text/html",False)),("xml",("text/xml",False))]
+ 
+getExtension:: FilePath -> String
+getExtension s=map toLower (reverse (takeWhile (/= '.') (reverse s)))
+ 
