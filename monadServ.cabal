@@ -29,7 +29,7 @@ Library
   else
     Build-Depends: base < 3, parsec, mtl, network
 
-  Build-Depends: old-time, old-locale, HTTP < 4000, time
+  Build-Depends: old-time, old-locale, HTTP < 4000, time, uniqueid
 
   Extensions:
      MultiParamTypeClasses

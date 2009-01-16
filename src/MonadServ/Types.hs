@@ -14,6 +14,7 @@ import System.IO   ( stdout, stderr, stdin, hFlush, hPutStr, hPutStrLn
 
 import MonadServ.HttpMonad
 import Data.Time
+import Data.Unique.Id
 
 type ServerCommand st = ( String , ServerConfig st -> Srv st () )
 --type ServerCommand = (String, String )
@@ -46,6 +47,7 @@ data InternalServerState st bst
    = InternalServerState
      { envVar          :: Environment st
      , evalTest        :: MVar String
+     , idSupplyMVar    :: MVar IdSupply
      , cancelHandler   :: IO ()
      , backendState    :: bst
      , backendService  :: ServerBackend bst

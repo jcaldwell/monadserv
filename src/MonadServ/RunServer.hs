@@ -30,6 +30,7 @@ import Text.PrettyPrint.HughesPJ hiding (char)
 import qualified MonadServ.JSON as JSON
 import MonadServ.HttpMonad
 import MonadServ.Types
+import Data.Unique.Id
 
 -- Entry Point
 runServer :: ServerConfig st -> ServerBackend bst -> st -> IO st
@@ -38,6 +39,8 @@ runServer config backend i = Ex.bracket setup exit (\iss -> acceptLoop iss)
       setup = do
           initEnv   <- initialEnvironment
           workerPoolMVar <- newMVar $ WorkerPool 0 [] []
+          initialSupply <- initIdSupply 'm'
+          idSupplyMVar <- newMVar $ initialSupply
           thVar     <- newEmptyMVar
           bst       <- initBackend backend
           sck       <- listenOn (PortNumber (fromIntegral $ mainPort config))
@@ -47,6 +50,7 @@ runServer config backend i = Ex.bracket setup exit (\iss -> acceptLoop iss)
                      { envVar         = initEnv
                      , evalTest       = thVar
                      , cancelHandler  = handleINT
+                     , idSupplyMVar   = idSupplyMVar
                      , backendState   = bst
                      , backendService = backend
                      , config         = config
@@ -101,12 +105,16 @@ handleRequest  req@(Request uri@(URI scheme _ path query fragment) _ _ rqBody) i
         mfunction <- getParmValue "function" query
         store <- takeMVar (storeMVar (envVar iss))
         (resultString, resultEnv) <- case mSessionId of
-                                           Nothing -> return $ handleNoSession store 
+                                           Nothing ->  handleNoSession store iss
                                            Just sessionId -> do let sessionEnv = (DataMap.lookup sessionId store) -- :: Maybe (MVar a)
                                                                 handleSession sessionId sessionEnv store iss mfunction
         putMVar (storeMVar (envVar iss)) resultEnv
         return resultString
-    where handleNoSession store = ("NO SESSION", store)
+    where handleNoSession store iss = 
+              do idSupply <- takeMVar (idSupplyMVar iss)
+                 let (sessionId,newSupply) =  getNextId idSupply
+                 putMVar (idSupplyMVar iss) newSupply
+                 return (show sessionId, store)
           handleSession sessionId Nothing store iss mfunction  = 
               do let newState = initState iss
                  (result, s) <- runRequest rqBody (tail path) newState iss mfunction False
@@ -300,3 +308,7 @@ mimeMapping=DataMap.fromList[("swf",("application/x-shockwave-flash",True)),
 getExtension:: FilePath -> String
 getExtension s=map toLower (reverse (takeWhile (/= '.') (reverse s)))
  
+getNextId :: IdSupply -> (Id, IdSupply)
+getNextId supply = 
+      let newSupply = snd $ splitIdSupply supply
+      in (idFromSupply supply, newSupply)
