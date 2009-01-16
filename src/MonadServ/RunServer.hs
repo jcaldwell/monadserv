@@ -158,14 +158,13 @@ runRequest' rqBody u st iss@(InternalServerState {backendState = bst, config = c
 	              if binary
 		        then do
                               result <- ByteString.readFile (fileName)
-		             -- (encode (unpackList result))
-		             -- writeContent handle mimetype (octetsToString (unpackList result)) False
+		              -- (encode (unpackList result))
+		              -- writeContent handle mimetype (octetsToString (unpackList result)) False
                               --writeContent handle mimetype (octetsToString (unpack result)) False
                               return  ( octetsToString (unpack result), st')
 		        else do
 		              result <- System.IO.readFile (fileName)
-                              return ("BINARY FILE",st')
---		              writeContent handle mimetype result False
+                              return (result,st')
 	        else do
 	              return ("404 Not FOUND",st')
 
